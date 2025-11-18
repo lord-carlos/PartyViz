@@ -24,3 +24,8 @@ animations:
     duration: 60
     settings:
       speed: 1
+  - slug: hacker-terminal
+    name: DEFCON Terminal
+    creator: "The Architect"
+    class_name: HackerTerminalAnimation
+    duration: 60
