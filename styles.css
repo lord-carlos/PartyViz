@@ -1,0 +1,150 @@
+/* --- SHARED RETRO AESTHETIC --- */
+:root {
+    --color-primary: #33ff00;
+    --color-bg: #050505;
+    --color-grid: #0f1f0f;
+    --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+body {
+    background-color: var(--color-bg);
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: var(--font-mono);
+    color: var(--color-primary);
+    overflow: hidden;
+}
+
+.main-container {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    border: 2px solid var(--color-grid);
+    box-shadow: 0 0 20px rgba(51, 255, 0, 0.2);
+    overflow: hidden;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+}
+
+/* CRT Scanline & Vignette Overlay */
+.overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: 
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    background-size: 100% 3px, 3px 100%;
+    pointer-events: none;
+    box-shadow: inset 0 0 100px rgba(0,0,0,0.9); 
+    z-index: 10;
+}
+
+/* UI Elements */
+.ui-status {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    font-size: 14px;
+    text-shadow: 0 0 5px var(--color-primary);
+    z-index: 15;
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.metadata {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    font-size: 12px;
+    text-align: right;
+    opacity: 0.6;
+    z-index: 15;
+    pointer-events: none;
+}
+        
+/* Controls */
+.controls-panel {
+    margin-top: 15px;
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    border: 1px dashed var(--color-grid);
+}
+
+button {
+    background: #0f1f0f;
+    border: 1px solid var(--color-primary);
+    color: var(--color-primary);
+    padding: 8px 16px;
+    font-family: inherit;
+    cursor: pointer;
+    text-transform: uppercase;
+    font-weight: bold;
+    transition: all 0.2s;
+}
+
+button:hover:not(:disabled) {
+    background: var(--color-primary);
+    color: var(--color-bg);
+    box-shadow: 0 0 10px var(--color-primary);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: #1a331a;
+    color: #1a331a;
+}
+
+/* Animation Views */
+.animation-view {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: none; /* All hidden by default */
+}
+
+/* Header & controls moved from index.html inline styles */
+header {
+    padding: 10px 20px;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#views {
+    position: relative;
+    height: calc(100vh - 56px);
+    overflow: hidden;
+    width: 100%;
+}
+
+.animation-view canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.controls label { margin-left: 8px; }
+
+.meta { font-size: 12px; opacity: 0.85; }

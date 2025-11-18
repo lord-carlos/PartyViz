@@ -1,0 +1,19 @@
+# List of animations for PartyViz
+# Each entry must include slug (folder name), name, creator and class_name (PascalCase export name).
+# Optional: duration (seconds) to use for automatic rotation; default is 8 seconds.
+
+animations:
+  - slug: template
+    name: Template Animation
+    creator: "Template Author"
+    class_name: TemplateAnimation
+    duration: 60
+  - slug: asteroids
+    name: Asteroids
+    creator: "Community"
+    class_name: AsteroidsAnimation
+    duration: 60
+    settings:
+      count: 5
+      base_speed: 1.3
+      sensitivity: 1.2

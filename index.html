@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PartyViz</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div>
+      <strong>PartyViz</strong>
+      <span class="meta"> — modular, canvas-based music visuals</span>
+    </div>
+    <div class="controls">
+      <button id="prev">⟨</button>
+      <button id="next">⟩</button>
+      <label>
+        <input id="audioTestMode" type="checkbox" checked /> Test Mode (random audio)
+      </label>
+    </div>
+  </header>
+
+  <div id="views"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <script type="module" src="./index.js"></script>
+</body>
+</html>
