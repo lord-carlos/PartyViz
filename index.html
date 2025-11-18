@@ -1,17 +1,19 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PartyViz</title>
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
   <!-- The Monitor Frame -->
   <div class="main-container">
-    
-    <!-- CRT Scanline & Vignette Overlay (sits on top of everything) -->
+
+    <!-- CRT Scanline & Vignette Overlay -->
     <div class="overlay"></div>
 
     <!-- Terminal Status Bar -->
@@ -21,6 +23,13 @@
         <span class="meta">:: SYS.MODULAR_VISUALS</span>
       </div>
       <div class="controls">
+        <!-- Audio Device Controls -->
+        <div id="audioControls">
+          <button id="btnEnableMic" title="Start Microphone">🎤 Enable Mic</button>
+          <!-- Hidden until permission granted -->
+          <select id="audioSourceSelect" style="display:none"></select>
+        </div>
+
         <label class="checkbox-wrapper">
           <input id="audioTestMode" type="checkbox" checked />
           <span class="checkmark">[X]</span> TEST_MODE
@@ -34,10 +43,11 @@
 
     <!-- The Viewport for Animations -->
     <div id="views"></div>
-    
+
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
   <script type="module" src="./index.js"></script>
 </body>
+
 </html>
