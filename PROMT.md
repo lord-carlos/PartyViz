@@ -1,12 +1,3 @@
-PartyViz - Animation Prompt (PROMT.md)
-
-Purpose
-- This file is a single-copy paste prompt targeted at AI agents or devs to create new animations for the PartyViz project.
-- If you copy these instructions and follow them exactly you should be able to produce a valid animation, HTML view snippet, and JS class that integrates with the existing loader.
-
-Tone: Keep it short, explicit, and output-oriented. Assume the recipient has basic DOM and Canvas knowledge.
-
----
 
 Quick Actionable Prompt (copy/paste for an AI or contributor)
 
@@ -166,12 +157,3 @@ Additions / Enhancements (optional)
 Safety & Constraints
 - Keep code simple — avoid external libs; a small utility function for easing or lerp is OK.
 - No network calls required (excluding the loader’s artifact fetching), no Node-specific operations, and avoid heavy CPU tasks.
-
----
-
-Any questions about the PROMT specification? If you want, I can:
-- Provide a ready-made AI prompt version with example responses expected (e.g. file contents), or
-- Generate a blank starter folder for a new animation with comments and placeholders (HTML + JS + CSS + manifest entry), or
-- Add a template for `index.html` manifest usage for better AI clarity.
-
-If anything else is needed, tell me which of the optional items you'd like added to the prompt and I’ll add them.
