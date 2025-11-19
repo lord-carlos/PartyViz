@@ -36,3 +36,8 @@ animations:
     duration: 60
     settings:
       speed_multiplier: 1.0
+  - slug: fractal-vortex
+    name: Psychedelic Vortex
+    creator: "FractalMind"
+    class_name: FractalVortexAnimation
+    duration: 60
