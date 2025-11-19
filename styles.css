@@ -81,14 +81,14 @@ header {
     margin-left: 10px;
 }
 
-/* Main View Area */
 #views {
     position: relative;
     flex-grow: 1;
-    /* Fill remaining space */
     width: 100%;
     overflow: hidden;
-    background: #000;
+    background: transparent;
+    z-index: 1;
+    /* Sit above background */
 }
 
 .animation-view {
@@ -215,4 +215,82 @@ select:hover {
 select option {
     background-color: #000;
     color: var(--color-primary);
+}
+
+/* --- 1. GLOBAL BACKGROUND (Deep Nebula) --- */
+.global-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #030305;
+    /* Base deep black */
+    overflow: hidden;
+    z-index: 2;
+    opacity: 0.8;
+    /* Optional: "Screen" mode makes the colors glow on top of white lines */
+    mix-blend-mode: screen;
+
+    /* Ensure we can still click buttons underneath */
+    pointer-events: none;
+}
+
+.nebula-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    /* Heavy blur for soft gradient look */
+    opacity: 0.6;
+    animation: nebulaFloat 25s infinite alternate ease-in-out;
+}
+
+/* Blob 1: Cyber Purple */
+.blob-1 {
+    top: -20%;
+    left: -10%;
+    width: 70vw;
+    height: 70vh;
+    background: #50208e;
+}
+
+/* Blob 2: Deep Teal */
+.blob-2 {
+    bottom: -20%;
+    right: -10%;
+    width: 80vw;
+    height: 60vh;
+    background: #09707a;
+    animation-duration: 35s;
+    /* Different speed */
+    animation-delay: -5s;
+}
+
+/* Blob 3: Night Blue */
+.blob-3 {
+    top: 40%;
+    left: 30%;
+    width: 50vw;
+    height: 50vh;
+    background: #152c9d;
+    animation-duration: 28s;
+    animation-delay: -12s;
+}
+
+@keyframes nebulaFloat {
+    0% {
+        transform: translate(0, 0) scale(1);
+    }
+
+    33% {
+        transform: translate(30px, 50px) scale(1.1);
+    }
+
+    66% {
+        transform: translate(-20px, 20px) scale(0.9);
+    }
+
+    100% {
+        transform: translate(10px, -30px) scale(1);
+    }
 }

@@ -95,7 +95,7 @@ export class SynthwaveRunAnimation {
     const rect = this.canvas.getBoundingClientRect();
     this.canvas.width = rect.width;
     this.canvas.height = rect.height;
-    
+
     this.init();
     if (!this.frameId) this.frameId = requestAnimationFrame(this.draw);
   }
@@ -108,7 +108,7 @@ export class SynthwaveRunAnimation {
   }
 
   // --- Helpers ---
-  
+
   // Project 3D World (x, y, z) to 2D Screen (sx, sy)
   // Z goes into screen (positive). Y is up (negative in canvas usually, but we handle offsets).
   project(x, y, z) {
@@ -130,7 +130,7 @@ export class SynthwaveRunAnimation {
 
     // Clear
     // We use a slight trail effect for motion blur feeling
-    ctx.fillStyle = 'rgba(10, 0, 20, 0.6)'; 
+    ctx.fillStyle = 'rgba(10, 0, 20, 0.6)';
     ctx.fillRect(0, 0, w, h);
 
     if (this.state === 'BOOT') {
@@ -144,7 +144,7 @@ export class SynthwaveRunAnimation {
 
   drawLoading(ctx, w, h) {
     this.bootTimer++;
-    
+
     ctx.fillStyle = '#0f0';
     ctx.font = '20px monospace';
     ctx.textAlign = 'center';
@@ -152,12 +152,12 @@ export class SynthwaveRunAnimation {
     // Retro loading bars
     const progress = Math.min(1, this.bootTimer / 120); // 2 seconds boot
     const barWidth = 300;
-    
-    ctx.fillText("INITIALIZING DRIVER...", w/2, h/2 - 40);
-    
+
+    ctx.fillText("INITIALIZING DRIVER...", w / 2, h / 2 - 40);
+
     ctx.strokeStyle = '#0f0';
-    ctx.strokeRect(w/2 - barWidth/2, h/2, barWidth, 20);
-    ctx.fillRect(w/2 - barWidth/2 + 4, h/2 + 4, (barWidth - 8) * progress, 12);
+    ctx.strokeRect(w / 2 - barWidth / 2, h / 2, barWidth, 20);
+    ctx.fillRect(w / 2 - barWidth / 2 + 4, h / 2 + 4, (barWidth - 8) * progress, 12);
 
     if (this.bootTimer > 120) {
       this.state = 'RUN';
@@ -167,9 +167,9 @@ export class SynthwaveRunAnimation {
   drawGame(ctx, w, h) {
     // --- 1. UPDATE LOGIC ---
     // Speed based on Mid + constant forward motion
-    const moveSpeed = 5 + (this.mid * 0.2); 
+    const moveSpeed = 5 + (this.mid * 0.2);
     this.speed = Math.floor(moveSpeed * 20);
-    
+
     // HUD Update
     if (this.elSpeed) this.elSpeed.textContent = this.speed;
     if (this.elSys) this.elSys.style.color = this.high > 80 ? '#f00' : '#0ff'; // Glitch warning
@@ -223,11 +223,17 @@ export class SynthwaveRunAnimation {
     this.playerOffset += (this.playerTargetOffset - this.playerOffset) * 0.12;
 
     // --- 2. BACKGROUND & SKY ---
-    
+
     // Draw Stars (Twinkle with High freq)
     ctx.fillStyle = '#fff';
     this.stars.forEach(star => {
-      const twinkle = Math.random() * (this.high * 0.02);
+
+      let twinkle = 0;
+      if (this.high > 30) {
+        twinkle = Math.random() * (this.high * 0.04);
+      }
+
+      // twinkle = Math.random() * (this.high * 0.02);
       ctx.globalAlpha = 0.5 + Math.random() * 0.5;
       ctx.beginPath();
       ctx.arc(star.x, star.y, Math.max(0.5, star.size + twinkle), 0, Math.PI * 2);
@@ -239,11 +245,11 @@ export class SynthwaveRunAnimation {
     const sunRadius = 50 + (this.low * 1.5);
     const sunX = w / 2;
     const sunY = this.horizonY - 50;
-    
+
     const sunGrad = ctx.createLinearGradient(sunX, sunY - sunRadius, sunX, sunY + sunRadius);
     sunGrad.addColorStop(0, '#ffff00');
     sunGrad.addColorStop(1, '#ff00cc');
-    
+
     ctx.fillStyle = sunGrad;
     ctx.beginPath();
     ctx.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
@@ -251,10 +257,10 @@ export class SynthwaveRunAnimation {
 
     // Sun "Blinds" (Horizontal cuts)
     ctx.fillStyle = 'rgba(10, 0, 20, 0.3)'; // Match bg color roughly
-    for(let i=0; i<10; i++) {
-        const y = sunY - sunRadius + (i * (sunRadius/4)) + (Date.now() / 50 % 20); 
-        const hCut = 2 + i; // cuts get thicker towards bottom
-        ctx.fillRect(sunX - sunRadius, y, sunRadius*2, hCut);
+    for (let i = 0; i < 10; i++) {
+      const y = sunY - sunRadius + (i * (sunRadius / 4)) + (Date.now() / 50 % 20);
+      const hCut = 2 + i; // cuts get thicker towards bottom
+      ctx.fillRect(sunX - sunRadius, y, sunRadius * 2, hCut);
     }
 
     // Draw Mountains (Dark silhouette against sun)
@@ -272,7 +278,7 @@ export class SynthwaveRunAnimation {
     ctx.stroke();
 
     // --- 3. 3D GRID FLOOR ---
-    
+
     ctx.save();
     // Clip to bottom half
     ctx.beginPath();
@@ -282,7 +288,7 @@ export class SynthwaveRunAnimation {
     // Grid Movement
     // We simulate movement by offsetting the Z of horizontal lines
     // Increase grid motion range to match deeper horizon
-    const timeZ = (Date.now() * (moveSpeed/10)) % 800;
+    const timeZ = (Date.now() * (5 / 10)) % 800;// was move speed
 
     ctx.strokeStyle = 'rgba(255, 0, 255, 0.5)';
     ctx.lineWidth = 2;
@@ -308,10 +314,10 @@ export class SynthwaveRunAnimation {
 
       const p1 = this.project(-3000, this.camHeight, currentZ);
       const p2 = this.project(3000, this.camHeight, currentZ);
-      
+
       // Distance fade
       ctx.globalAlpha = 1 - (currentZ / 2000);
-      
+
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
@@ -322,7 +328,7 @@ export class SynthwaveRunAnimation {
     ctx.restore();
 
     // --- 4. ENTITIES (Names) ---
-    
+
     // Sort by Z (Painter's algo) - draw far ones first
     this.entities.sort((a, b) => b.z - a.z);
 
@@ -332,7 +338,7 @@ export class SynthwaveRunAnimation {
 
     for (let i = this.entities.length - 1; i >= 0; i--) {
       const ent = this.entities[i];
-      
+
       // Move Object
       ent.z -= moveSpeed;
 
@@ -382,20 +388,20 @@ export class SynthwaveRunAnimation {
 
       // Draw
       const p = this.project(ent.x, ent.y, ent.z);
-      
+
       // Scale font by distance
       const fontSize = Math.max(1, 40 * p.scale);
       ctx.font = `bold ${fontSize}px "Courier New"`;
-      
+
       // Text Glow
       ctx.shadowBlur = 10;
       ctx.shadowColor = ent.color;
       ctx.fillStyle = ent.color;
-      
+
       // Simple wireframe box around text
       const boxW = ctx.measureText(ent.text).width + 10;
       const boxH = fontSize;
-      
+
       // Only draw the normal text if it's not flagged as dead — otherwise, draw
       // the fading or explosion effect so it isn't immediately overdrawn.
       if (!ent.dead) {
@@ -403,8 +409,8 @@ export class SynthwaveRunAnimation {
       }
       ctx.strokeStyle = ent.color;
       ctx.lineWidth = 2;
-      ctx.strokeRect(p.x - boxW/2, p.y - boxH/2, boxW, boxH);
-      
+      ctx.strokeRect(p.x - boxW / 2, p.y - boxH / 2, boxW, boxH);
+
       ctx.shadowBlur = 0;
 
       // If the entity has been flagged dead, render its effect and don't draw normal text
@@ -458,7 +464,7 @@ export class SynthwaveRunAnimation {
     // It's a cool vector triangle
     const px = w / 2 + this.playerOffset;
     const py = h - 40;
-    
+
     // Car bounce based on Bass
     const bounce = this.low * 0.1;
 
@@ -467,7 +473,7 @@ export class SynthwaveRunAnimation {
     ctx.fillStyle = '#000';
     ctx.strokeStyle = '#0ff';
     ctx.lineWidth = 3;
-    
+
     ctx.beginPath();
     ctx.moveTo(px, py - 30 - bounce); // Nose
     ctx.lineTo(px - 40, py + 20); // Back Left
@@ -480,7 +486,7 @@ export class SynthwaveRunAnimation {
     ctx.fillStyle = '#0ff';
     ctx.fillRect(px - 30, py + 20, 15, 5);
     ctx.fillRect(px + 15, py + 20, 15, 5);
-    
+
     // "Laser" grid lines from car
     ctx.globalAlpha = 0.3;
     ctx.beginPath();
