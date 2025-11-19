@@ -106,6 +106,7 @@ async function init() {
   let currentIndex = 0;
   let currentItem = null;
   let rotationTimer = null;
+  let paused = false; // when true, stop automatic rotation
 
   function showIndex(index) {
     if (currentItem && currentItem.instance && typeof currentItem.instance.stop === 'function') {
@@ -126,31 +127,55 @@ async function init() {
     currentIndex = index;
   }
 
-  function rotateNext() {
-    const next = (currentIndex + 1) % loaded.length;
+  function rotateNext(step = 1) {
+    // step is 1 for forward, -1 for previous
+    const next = (currentIndex + step + loaded.length) % loaded.length;
     showIndex(next);
     const nextItem = loaded[next];
     const duration = (nextItem && nextItem.config && nextItem.config.duration) || DEFAULT_DURATION;
 
     rotationTimer && clearTimeout(rotationTimer);
-    rotationTimer = setTimeout(rotateNext, duration * 1000);
+    // don't schedule next if paused (e.g., user pressed pause)
+    if (!paused) {
+      rotationTimer = setTimeout(() => rotateNext(1), duration * 1000);
+    }
   }
 
   // --- UI EVENTS ---
 
   document.getElementById('prev').addEventListener('click', () => {
-    const prev = (currentIndex - 1 + loaded.length) % loaded.length;
-    showIndex(prev);
-    // Reset rotation timer on manual interaction
-    clearTimeout(rotationTimer);
-    rotationTimer = setTimeout(rotateNext, 8000);
+    // If user interacts manually, resume automatic rotation and go to previous.
+    paused = false;
+    rotateNext(-1);
   });
 
   document.getElementById('next').addEventListener('click', () => {
-    const next = (currentIndex + 1) % loaded.length;
-    showIndex(next);
-    clearTimeout(rotationTimer);
-    rotationTimer = setTimeout(rotateNext, 8000);
+    // If user interacts manually, resume automatic rotation and go to next.
+    paused = false;
+    rotateNext(1);
+  });
+
+  // Pause button toggles automatic rotation; it leaves the current animation running.
+  const pauseBtn = document.getElementById('pause');
+  pauseBtn.addEventListener('click', () => {
+    paused = !paused;
+    if (paused) {
+      // stop future rotations
+      clearTimeout(rotationTimer);
+      rotationTimer = null;
+      pauseBtn.textContent = '▶';
+      pauseBtn.title = 'Resume rotation';
+    } else {
+      // resume with the duration of the next item
+      pauseBtn.textContent = '⏸';
+      pauseBtn.title = 'Pause rotation';
+      // schedule next based on next item's config
+      const nextIndex = (currentIndex + 1) % loaded.length;
+      const nextItem = loaded[nextIndex];
+      const duration = (nextItem && nextItem.config && nextItem.config.duration) || DEFAULT_DURATION;
+      rotationTimer && clearTimeout(rotationTimer);
+      rotationTimer = setTimeout(() => rotateNext(1), duration * 1000);
+    }
   });
 
   // Test Mode Toggle
@@ -234,7 +259,7 @@ async function init() {
   // --- STARTUP ---
   showIndex(0);
   const firstDuration = (currentItem && currentItem.config && currentItem.config.duration) || DEFAULT_DURATION;
-  rotationTimer = setTimeout(rotateNext, firstDuration * 1000);
+  rotationTimer = setTimeout(() => rotateNext(1), firstDuration * 1000);
 
   window.rotateNext = rotateNext;
 }
