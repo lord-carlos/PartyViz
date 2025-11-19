@@ -1,5 +1,4 @@
-
-Quick Actionable Prompt (copy/paste for an AI or contributor)
+Please create an animation that XXXXXXXXXX
 
 You are writing a PartyViz animation module. Follow these hard rules:
 1) Create a folder `animations/<slug>` where `slug` is lowercase, single-word, hyphenated if required.
@@ -54,7 +53,10 @@ Audio Contract
 - PartyViz visuals should feel like an 80s monochrome terminal (green or amber on black) with a minimal, possibly pixelated look.
 - Preferred palette is a single accent color (`--color-primary`) on a very dark or black background (`--color-bg`), optionally with a faint vignette/scanline overlay.
 - Use `var(--color-primary)` and `var(--color-bg)` to stay consistent with global styles.
-- Avoid huge gradients or wide color ranges; you may include local CSS for glow or scanline.
+- Avoid huge gradients or wide color ranges.
+- Optional is a synth wave / retro wave style, in that case huge color ranges are allowed.
+- Avoid scanlines / overlay, as the .html that will embed the animation will already add a tv scanline overlay.
+- In the root `./names.json` is a json array `names` that contains a list of name that can be used to enhance the animations with personalized names.
 
 CSS variables the project exposes (main variables in `styles.css`)
 - --color-primary: Accent color (bright green by default)
@@ -152,7 +154,7 @@ Deliverable requirements
 
 Additions / Enhancements (optional)
 - Add animation-specific CSS file `animations/<slug>/<slug>-animation.css` and link it from the HTML snippet.
-- Add a `thumbnail.png` or `preview.jpg` in the animation folder (not required).
+- In the root `./names.json` is a json array `names` that contains a list of name that can be used for the animations.
 
 Safety & Constraints
 - Keep code simple — avoid external libs; a small utility function for easing or lerp is OK.
