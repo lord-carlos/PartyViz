@@ -71,7 +71,7 @@ export class FractalVortexAnimation {
                 alpha: 0,
                 color: `hsl(${this.hue + 180}, 100%, 70%)` // Complementary color to current background
             });
-            this.nameCooldown = 20; // limit spawn rate
+            this.nameCooldown = 60; // limit spawn rate
         }
     }
 
@@ -98,7 +98,7 @@ export class FractalVortexAnimation {
         this.hue = (this.time * 20) % 360;
 
         // Rotation of the vortex
-        this.rotation += 0.01 + (this.low * 0.0005);
+        this.rotation += 0.0 + (this.low * 0.0001);
 
         // 3. DRAW FRACTAL GEOMETRY
         ctx.save();
@@ -116,7 +116,7 @@ export class FractalVortexAnimation {
 
             // Each layer rotates slightly relative to the last
             // Creates the spiral tunnel
-            const layerAngle = (i * 0.2) + this.rotation;
+            const layerAngle = (i * 0.02) * this.rotation;
             const scale = 1 + (i * 0.15) + (Math.sin(this.time) * 0.1);
 
             ctx.rotate(layerAngle);
@@ -166,7 +166,7 @@ export class FractalVortexAnimation {
             let n = this.activeNames[i];
 
             // Move outwards
-            n.r += 2 + (this.low * 0.1); // Bass boosts speed
+            n.r += 0.03 + (this.low * 0.04); // Bass boosts speed
             // Rotate with the vortex
             n.theta += 0.01;
             n.alpha = Math.min(1, n.r / 100); // Fade in

@@ -8,6 +8,8 @@ animations:
     creator: "Template Author"
     class_name: TemplateAnimation
     duration: 60
+    settings:
+      sensitivity: 1.0
   - slug: asteroids
     name: Asteroids
     creator: "Community"
