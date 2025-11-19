@@ -12,8 +12,8 @@ export class AudioManager {
         this.rafId = null;
 
         this.bassRange = [0, 5];
-        this.midRange = [11, 100];
-        this.highRange = [101, 500];
+        this.midRange = [15, 90];
+        this.highRange = [120, 500];
     }
 
     setTestMode(enabled) {

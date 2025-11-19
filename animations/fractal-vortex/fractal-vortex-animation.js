@@ -71,7 +71,7 @@ export class FractalVortexAnimation {
                 alpha: 0,
                 color: `hsl(${this.hue + 180}, 100%, 70%)` // Complementary color to current background
             });
-            this.nameCooldown = 60; // limit spawn rate
+            this.nameCooldown = 600; // limit spawn rate
         }
     }
 

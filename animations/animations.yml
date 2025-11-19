@@ -45,3 +45,8 @@ animations:
     creator: "FractalMind"
     class_name: FractalVortexAnimation
     duration: 60
+  - slug: radar-scan
+    name: Deep Scan
+    creator: "DefenseNet"
+    class_name: RadarScanAnimation
+    duration: 25
