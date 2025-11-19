@@ -21,6 +21,10 @@ Customization
 -------------
 - You can edit `names.json` to customize displayed names used by the app.
 
+Per-animation settings
+----------------------
+- Each animation has optional settings in `animations/animations.yml`. For example, `synthwave-run` exposes `maxNames` to control how many name entities can appear simultaneously. Change it in `animations/animations.yml` under the `settings:` block for each animation.
+
 Quick test
 ----------
 Run a simple static server and open the site locally:

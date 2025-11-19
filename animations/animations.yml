@@ -35,7 +35,9 @@ animations:
     class_name: SynthwaveRunAnimation
     duration: 60
     settings:
-      speed_multiplier: 1.0
+      speed_multiplier: 0.7
+      # Maximum number of names that can be on-screen at once
+      maxNames: 3
   - slug: fractal-vortex
     name: Psychedelic Vortex
     creator: "FractalMind"

@@ -7,14 +7,14 @@
 
 /* CRT Scanline effect specific to this view */
 #view-synthwave-run::after {
-    content: " ";
+    /* content: " ";
     display: block;
     position: absolute;
     top: 0; left: 0; bottom: 0; right: 0;
     background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
     background-size: 100% 4px;
     z-index: 10;
-    pointer-events: none;
+    pointer-events: none; */
 }
 
 /* HUD Text Styles */
