@@ -1,0 +1,31 @@
+#view-synthwave-run {
+    /* The Deep Void */
+    background: linear-gradient(to bottom, #0b001a 0%, #210024 50%, #0a0014 100%);
+    overflow: hidden;
+    font-family: 'Courier New', Courier, monospace; /* Fallback if main font fails */
+}
+
+/* CRT Scanline effect specific to this view */
+#view-synthwave-run::after {
+    content: " ";
+    display: block;
+    position: absolute;
+    top: 0; left: 0; bottom: 0; right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+    background-size: 100% 4px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* HUD Text Styles */
+.synth-hud {
+    text-shadow: 0 0 5px #0ff, 0 0 10px #0ff;
+    color: #0ff;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+
+.synth-score {
+    text-shadow: 0 0 5px #f0f, 0 0 10px #f0f;
+    color: #f0f;
+}

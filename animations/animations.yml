@@ -29,3 +29,10 @@ animations:
     creator: "The Architect"
     class_name: HackerTerminalAnimation
     duration: 60
+  - slug: synthwave-run
+    name: Neon Highway
+    creator: "SynthDriver"
+    class_name: SynthwaveRunAnimation
+    duration: 60
+    settings:
+      speed_multiplier: 1.0
