@@ -25,7 +25,7 @@ animations:
     class_name: TankDriveAnimation
     duration: 60
     settings:
-      speed: 1
+      speed: 4
   - slug: hacker-terminal
     name: DEFCON Terminal
     creator: "The Architect"

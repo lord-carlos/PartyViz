@@ -172,7 +172,7 @@ export class HackerTerminalAnimation {
         ctx.font = `${this.matrixFontSize}px monospace`;
 
         // Speed depends on Low/Bass
-        const speed = 1 + (this.low * 0.1);
+        const speed = 0.14 + (this.low * 0.02);
 
         for (let i = 0; i < this.matrixColumns.length; i++) {
             // Random char
@@ -266,7 +266,7 @@ export class HackerTerminalAnimation {
         const cy = y + h / 2;
 
         // Rotation speed
-        this.rotation += 0.005 + (this.mid * 0.0002);
+        this.rotation += 0.0005 + (this.mid * 0.0001);
 
         // Header
         ctx.textAlign = "left";
@@ -280,7 +280,7 @@ export class HackerTerminalAnimation {
         // Actually, let's just draw all dots/lines. 
         // We rotate coordinates around Y axis.
 
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 2;
         const cosR = Math.cos(this.rotation);
         const sinR = Math.sin(this.rotation);
 
@@ -318,7 +318,7 @@ export class HackerTerminalAnimation {
 
             // Audio reactive size
             const pulse = (this.high * 0.1) * Math.random();
-            const size = 2 + pulse;
+            const size = 4 + pulse;
 
             ctx.beginPath();
             ctx.moveTo(proj.x + 5, proj.y);

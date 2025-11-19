@@ -236,7 +236,7 @@ export class SynthwaveRunAnimation {
     ctx.globalAlpha = 1;
 
     // Draw Sun (Pulse with Low freq)
-    const sunRadius = 60 + (this.low * 0.5);
+    const sunRadius = 50 + (this.low * 1.5);
     const sunX = w / 2;
     const sunY = this.horizonY - 50;
     
