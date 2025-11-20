@@ -69,3 +69,15 @@ animations:
       buildingCount: 200
       particleCount: 5000
       vehicleCount: 90
+  - slug: wireframe-planet
+    name: Wireframe Planet
+    creator: "Community"
+    class_name: WireframePlanetAnimation
+    duration: 30
+    settings:
+      planetRadius: 10
+      planetSegments: 32
+      planetColor: 0x00ffff
+      cameraDistance: 40
+      cameraHeight: 10
+      starCount: 2000
