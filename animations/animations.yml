@@ -54,8 +54,18 @@ animations:
     name: Pong
     creator: "Community"
     class_name: PongAnimation
-    duration: 30
+    duration: 60
     settings:
       paddleSpeed: 5
       ballSpeed: 5
       particleCount: 50
+  - slug: synthwave-city
+    name: Synthwave City
+    creator: "Community"
+    class_name: SynthwaveCityAnimation
+    duration: 60
+    settings:
+      citySize: 30
+      buildingCount: 200
+      particleCount: 5000
+      vehicleCount: 90
