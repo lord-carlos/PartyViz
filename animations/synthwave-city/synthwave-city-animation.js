@@ -7,6 +7,34 @@ export class SynthwaveCityAnimation {
     this.config = config || {};
     this.frameId = null;
     
+    // Color palette for the city
+    this.colors = {
+      sky: 0x0a0a1a,        // Dark blue
+      fog: 0x0a0a2a,         // Slightly lighter blue
+      ground: 0x0a0a0a,       // Dark gray
+      grid: 0x16213e,        // Dark blue
+      buildings: {
+        tower: 0x1a1a2e,     // Dark blue
+        block: 0x16213e,     // Dark blue
+        pyramid: 0x0f3460     // Dark blue
+      },
+      windows: 0x00ffff,      // Cyan
+      vehicles: 0xff00ff,     // Magenta
+      lights: {
+        ambient: 0x404040,    // Gray
+        directional: 0xff00ff, // Magenta
+        point: 0x00ffff      // Cyan
+      },
+      particles: {
+        colors: [
+          0xff00ff,           // Magenta
+          0x00ffff,           // Cyan
+          0xffff00            // Yellow
+        ]
+      },
+      hologram: 0x00ffff      // Cyan
+    };
+    
     // Audio frequency values
     this.LOW = 0;
     this.MID = 0;
@@ -32,7 +60,7 @@ export class SynthwaveCityAnimation {
     this.buildingCount = 0;
     
     // Materials
-    this.buildingMaterial = null;
+    this.buildingMaterials = {};
     this.windowMaterial = null;
     this.roadMaterial = null;
     
@@ -78,7 +106,7 @@ export class SynthwaveCityAnimation {
     try {
       // Initialize Three.js scene
       this.scene = new THREE.Scene();
-      this.scene.fog = new THREE.Fog(0x000033, 50, 500);
+      this.scene.fog = new THREE.Fog(this.colors.fog, 50, 200);
       
       // Setup camera
       const aspect = this.canvas.width / this.canvas.height;
@@ -98,7 +126,7 @@ export class SynthwaveCityAnimation {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      this.renderer.setClearColor(0x000033, 1);
+      this.renderer.setClearColor(this.colors.sky, 1);
       
       // Create materials
       this.createMaterials();
@@ -148,41 +176,49 @@ export class SynthwaveCityAnimation {
   }
   
   createMaterials() {
-    // Building material with emissive properties
-    this.buildingMaterial = new THREE.MeshPhongMaterial({
-      color: 0x1a1a2e,
-      emissive: 0x0f3460,
+    // Building materials for different types
+    this.buildingMaterials.tower = new THREE.MeshPhongMaterial({
+      color: this.colors.buildings.tower,
+      emissive: this.colors.buildings.tower,
+      emissiveIntensity: 0.2,
+      shininess: 10
+    });
+    
+    this.buildingMaterials.block = new THREE.MeshPhongMaterial({
+      color: this.colors.buildings.block,
+      emissive: this.colors.buildings.block,
+      emissiveIntensity: 0.2,
+      shininess: 10
+    });
+    
+    this.buildingMaterials.pyramid = new THREE.MeshPhongMaterial({
+      color: this.colors.buildings.pyramid,
+      emissive: this.colors.buildings.pyramid,
       emissiveIntensity: 0.2,
       shininess: 10
     });
     
     // Window material
     this.windowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.8
+      color: this.colors.windows
     });
     
     // Road material
-    this.roadMaterial = new THREE.MeshBasicMaterial({
-      color: 0x0a0a0a
+    this.roadMaterial = new THREE.MeshBasicMaterial({ 
+      color: this.colors.ground
     });
   }
   
   createGround() {
     // Create ground plane
     const groundGeometry = new THREE.PlaneGeometry(this.citySize * 10, this.citySize * 10);
-    const groundMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0x0a0a0a,
-      side: THREE.DoubleSide 
-    });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    const ground = new THREE.Mesh(groundGeometry, this.roadMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
     
     // Create grid lines
-    const gridHelper = new THREE.GridHelper(this.citySize * 10, this.citySize, 0x16213e, 0x0f3460);
+    const gridHelper = new THREE.GridHelper(this.citySize * 10, this.citySize, this.colors.grid, this.colors.ground);
     gridHelper.position.y = 0.01;
     this.scene.add(gridHelper);
   }
@@ -217,19 +253,19 @@ export class SynthwaveCityAnimation {
     switch(type) {
       case 'tower':
         geometry = new THREE.BoxGeometry(1, height, 1);
-        mesh = new THREE.Mesh(geometry, this.buildingMaterial.clone());
+        mesh = new THREE.Mesh(geometry, this.buildingMaterials.tower.clone());
         mesh.position.set(x, height/2, z);
         break;
         
       case 'block':
         geometry = new THREE.BoxGeometry(2, height, 2);
-        mesh = new THREE.Mesh(geometry, this.buildingMaterial.clone());
+        mesh = new THREE.Mesh(geometry, this.buildingMaterials.block.clone());
         mesh.position.set(x, height/2, z);
         break;
         
       case 'pyramid':
         geometry = new THREE.ConeGeometry(1.5, height, 4);
-        mesh = new THREE.Mesh(geometry, this.buildingMaterial.clone());
+        mesh = new THREE.Mesh(geometry, this.buildingMaterials.pyramid.clone());
         mesh.position.set(x, height/2, z);
         mesh.rotation.y = Math.PI / 4;
         break;
@@ -287,11 +323,11 @@ export class SynthwaveCityAnimation {
   
   createLighting() {
     // Ambient light
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
+    const ambientLight = new THREE.AmbientLight(this.colors.lights.ambient, 0.3);
     this.scene.add(ambientLight);
     
     // Directional light (sun/moon)
-    const directionalLight = new THREE.DirectionalLight(0xff00ff, 0.5);
+    const directionalLight = new THREE.DirectionalLight(this.colors.lights.directional, 0.5);
     directionalLight.position.set(50, 50, 50);
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 1024;
@@ -299,8 +335,13 @@ export class SynthwaveCityAnimation {
     this.scene.add(directionalLight);
     
     // Point lights for atmosphere
-    for (let i = 0; i < 3; i++) {
-      const pointLight = new THREE.PointLight(0x00ffff, 0.5, 20);
+    for (let i = 0; i < 5; i++) {
+      const colorIndex = i % this.colors.particles.colors.length;
+      const pointLight = new THREE.PointLight(
+        this.colors.particles.colors[colorIndex], 
+        0.5, 
+        20
+      );
       pointLight.position.set(
         (Math.random() - 0.5) * this.citySize * 4,
         10 + Math.random() * 10,
@@ -321,9 +362,13 @@ export class SynthwaveCityAnimation {
       positions[i * 3 + 1] = Math.random() * 30;
       positions[i * 3 + 2] = (Math.random() - 0.5) * this.citySize * 10;
       
-      colors[i * 3] = Math.random();
-      colors[i * 3 + 1] = Math.random();
-      colors[i * 3 + 2] = Math.random();
+      // Use our color palette
+      const color = new THREE.Color(
+        this.colors.particles.colors[i % this.colors.particles.colors.length]
+      );
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
     }
     
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -345,9 +390,10 @@ export class SynthwaveCityAnimation {
     
     for (let i = 0; i < vehicleCount; i++) {
       const geometry = new THREE.BoxGeometry(0.2, 0.1, 0.4);
-      const material = new THREE.MeshBasicMaterial({ 
-        color: 0xff00ff,
-        emissive: 0xff00ff,
+      // Use MeshStandardMaterial instead of MeshBasicMaterial to support emissive
+      const material = new THREE.MeshStandardMaterial({ 
+        color: this.colors.vehicles,
+        emissive: this.colors.vehicles,
         emissiveIntensity: 0.5
       });
       
@@ -433,8 +479,8 @@ export class SynthwaveCityAnimation {
       if (userData.windowLights) {
         for (const window of userData.windowLights) {
           const intensity = window.userData.baseIntensity + (this.MID / 100) * 0.5;
-          window.material.emissiveIntensity = intensity * 
-            (0.5 + 0.5 * Math.sin(this.time * window.userData.flickerSpeed));
+          window.material.color.setHex(this.colors.windows);
+          window.material.color.multiplyScalar(intensity);
         }
       }
       
@@ -519,6 +565,13 @@ export class SynthwaveCityAnimation {
     // Audio-reactive camera movement
     if (this.LOW > 70) {
       this.camera.position.y = 25 + Math.sin(this.time * 0.01) * 2;
+    }
+    
+    // Update fog density based on audio
+    if (this.scene.fog) {
+      const fogDensity = 0.5 + (this.LOW / 100) * 0.5;
+      this.scene.fog.near = 50 - fogDensity * 20;
+      this.scene.fog.far = 200 - fogDensity * 50;
     }
   }
   
