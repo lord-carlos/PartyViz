@@ -50,3 +50,12 @@ animations:
     creator: "DefenseNet"
     class_name: RadarScanAnimation
     duration: 25
+  - slug: pong
+    name: Pong
+    creator: "Community"
+    class_name: PongAnimation
+    duration: 30
+    settings:
+      paddleSpeed: 5
+      ballSpeed: 5
+      particleCount: 50

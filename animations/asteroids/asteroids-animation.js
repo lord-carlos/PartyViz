@@ -82,14 +82,14 @@ export class AsteroidsAnimation {
 
     _initAsteroids() {
         // If canvas has no size yet, delay initialization
-        if (!this.width || !this.height) {
-            console.log('[Asteroids] Canvas has no size yet, delaying _initAsteroids');
-            requestAnimationFrame(() => {
-                this.resize();
-                this._initAsteroids();
-            });
-            return;
-        }
+        // if (!this.width || !this.height) {
+        //     console.log('[Asteroids] Canvas has no size yet, delaying _initAsteroids');
+        //     requestAnimationFrame(() => {
+        //         this.resize();
+        //         this._initAsteroids();
+        //     });
+        //     return;
+        // }
 
         this.asteroids = [];
         for (let i = 0; i < this.ASTEROID_COUNT; i++) {

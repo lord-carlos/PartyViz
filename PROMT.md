@@ -57,6 +57,7 @@ Audio Contract
 - Optional is a synth wave / retro wave style, in that case huge color ranges are allowed.
 - Avoid scanlines / overlay, as the .html that will embed the animation will already add a tv scanline overlay.
 - In the root `./names.json` is a json array `names` that contains a list of name that can be used to enhance the animations with personalized names.
+- Add a background animation, but make sure it does not distract from the forground. (Stars, nebulars etc)
 
 CSS variables the project exposes (main variables in `styles.css`)
 - --color-primary: Accent color (bright green by default)
@@ -69,6 +70,10 @@ Best Practices & Performance
 - Use `requestAnimationFrame` in `start()` for animation; use `cancelAnimationFrame` in `stop()`.
 - Avoid long-running synchronous loops or CPU heavy computations in the draw path.
 - Keep draw code idempotent: draw only what’s needed and avoid global state modification during the draw loop.
+- Canvas sizing: Must be done in start() method using getBoundingClientRect()
+- CSS colors: Use getComputedStyle(this.canvas). for exampel style.getPropertyValue('--color-primary').trim() || '#0f0';
+- Names fetching: Use async fetchNames() with fallback array
+- Add some console.log('[ANIMATIONNAME] ...') for debugging, but don't  add it into the draw loop.
 
 HTML & CSS Requirements
 - Root view must use `<div id="view-<slug>" class="animation-view">` and canvas `id="canvas-<slug>"`.
@@ -85,7 +90,6 @@ Testing / Dev Mode
 - No Node or bundler required. Use a simple static server to host the repo root.
   - Example (PowerShell):
     ```powershell
-    cd c:\Users\erbro\Documents\projects\PartyViz
     python -m http.server 8000
     Start-Process "http://localhost:8000"
     ```
