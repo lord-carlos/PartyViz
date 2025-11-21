@@ -75,8 +75,8 @@ animations:
     class_name: WireframePlanetAnimation
     duration: 30
     settings:
-      planetRadius: 10
-      planetSegments: 32
+      planetRadius: 20
+      planetSegments: 16
       planetColor: 0x00ffff
       cameraDistance: 40
       cameraHeight: 10
