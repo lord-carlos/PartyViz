@@ -3,6 +3,7 @@
   height: 100%;
   overflow: hidden;
   position: relative;
+  background-color: #050510; /* Deep dark blue/black for better contrast */
 }
 
 #canvas-pong {
@@ -12,4 +13,6 @@
   position: absolute;
   top: 0;
   left: 0;
+  /* Optional: Add a subtle CRT glow/blur via CSS */
+  filter: drop-shadow(0 0 2px rgba(0, 255, 0, 0.5));
 }
