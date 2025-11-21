@@ -81,3 +81,29 @@ animations:
       cameraDistance: 40
       cameraHeight: 10
       starCount: 2000
+  - slug: pachinko
+    name: Pachinko
+    creator: "Community"
+    class_name: PachinkoAnimation
+    duration: 30
+    settings:
+      ballRadius: 0.3
+      ballColors: [0xff6b6d, 0x00ffff, 0x9932cc]
+      ballSpawnRate: 2
+      maxBalls: 50
+      gravity: 0.5
+      dampingFactor: 0.8
+      pegRows: 10
+      pegColumns: 8
+      pegRadius: 0.2
+      boardWidth: 20
+      boardHeight: 30
+      lowThreshold: 70
+      midThreshold: 70
+      highThreshold: 70
+      nameLifetime: 200
+      nameFadeSpeed: 0.02
+      nameScale: 3
+      particleCount: 100
+      particleLifetime: 50
+      particleSpeed: 0.3
