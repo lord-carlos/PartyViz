@@ -10,6 +10,12 @@ animations:
     duration: 60
     settings:
       sensitivity: 1.0
+  - slug: debug-visualizer
+    name: Audio Debug Visualizer
+    creator: "Copilot"
+    class_name: DebugVisualizerAnimation
+    duration: 60
+
   - slug: asteroids
     name: Asteroids
     creator: "Community"
@@ -90,7 +96,7 @@ animations:
       ballRadius: 0.3
       ballColors: [0xff6b6d, 0x00ffff, 0x9932cc]
       ballSpawnRate: 2
-      maxBalls: 50
+      maxBalls: 30
       gravity: 0.5
       dampingFactor: 0.8
       pegRows: 10
@@ -98,12 +104,12 @@ animations:
       pegRadius: 0.2
       boardWidth: 20
       boardHeight: 30
-      lowThreshold: 70
-      midThreshold: 70
-      highThreshold: 70
-      nameLifetime: 200
-      nameFadeSpeed: 0.02
-      nameScale: 3
+      lowThreshold: 73
+      midThreshold: 59
+      highThreshold: 58
+      nameLifetime: 500
+      nameFadeSpeed: 0.01
+      nameScale: 10
       particleCount: 100
       particleLifetime: 50
       particleSpeed: 0.3

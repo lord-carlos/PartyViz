@@ -94,6 +94,8 @@ async function init() {
 
   // --- AUDIO SETUP ---
   const audioManager = new AudioManager();
+  // Expose for animations / dev console
+  window.audioManager = audioManager;
   // Start the loop immediately (it defaults to Test Mode)
   audioManager.startLoop();
 

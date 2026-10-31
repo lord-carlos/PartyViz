@@ -82,7 +82,7 @@ export class RadarScanAnimation {
 
   updateState() {
     // 1. Determine Alert Level (Based on Bass)
-    if (this.low > 60) {
+    if (this.low > 73) {
       this.alertLevel = Math.min(this.alertLevel + 0.1, 1); // Ramp up to red
     } else {
       this.alertLevel = Math.max(this.alertLevel - 0.05, 0); // Cool down

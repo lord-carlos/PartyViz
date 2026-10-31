@@ -30,12 +30,6 @@ DOM & Naming Conventions (required)
 - Metadata placeholder: `div#meta-<slug>`.
 - CSS: global `styles.css` is loaded by the app; animation-specific styling may be included in the HTML snippet.
 
-Frequency Band Mapping & Conventions
-- Values are normalized 0–100 before reaching animations.
-  - LOW — Bass (0–200Hz) -> big size, movement speed, background pulse.
-  - MID — Vocals / Rhythm (200Hz–2kHz) -> color, position, medium detail.
-  - HIGH — Hi-hats / cymbals -> glow, fine detail, particles, text flicker.
-- Smoothing/normalization is done in the loader/audio layer; animations assume clean values.
 
 Loader & Manifest
 - The (future) `index.html` manifest is the canonical list of animations. Typical fields:
@@ -49,14 +43,6 @@ Loader & Manifest
   4. Wire `updateFrequencies()` calls (60Hz by default) from the audio analyzer or test-mode generator
   5. Toggle `.animation-view` display and call `start()`/`stop()` as views change
 
-Development & Test Mode
-- No Node or build tool required — run a local static server. Example (PowerShell):
-
-```powershell
-cd c:\Users\erbro\Documents\projects\PartyViz
-python -m http.server 8000
-Start-Process "http://localhost:8000"
-```
 
 - A minimal `index.html` test-mode must simulate audio and call `updateFrequencies(low, mid, high)` at 60Hz (random or seeded values). Use `window.AudioTestMode = true` to toggle.
 - Loader should expose `window.currentAnimation` in dev so you can interact via the console:
@@ -82,5 +68,3 @@ PR Checklist (for all animation additions)
 
 Examples & Quick Reference
 - See `animations/template/template-animation.js` for minimal class and frequency mapping examples. Keep changes concise and clearly commented.
-
-If anything is missing, please add small examples or references to real loader code (once `index.html` is added). Feedback needed: do you want short code-snippets inline to be used by Copilot, or prefer explicit references only?

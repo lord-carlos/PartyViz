@@ -132,7 +132,7 @@ export class PongAnimation {
 
   updatePaddles() {
     // Audio reactivity: Paddles pulse in size with Bass
-    const sizeMod = (this.LOW / 255) * 40;
+    const sizeMod = (this.LOW / 100) * 40;
     this.leftPaddle.height = 80 + sizeMod;
     this.rightPaddle.height = 80 + sizeMod;
     
@@ -153,7 +153,7 @@ export class PongAnimation {
   }
   
   updateBall() {
-    const speedMod = 1 + (this.MID / 500); // Music speeds up ball slightly
+    const speedMod = 1 //+ (this.MID / 700); // Music speeds up ball slightly
     
     this.ball.trail.push({ x: this.ball.x, y: this.ball.y, alpha: 1 });
     if (this.ball.trail.length > 20) this.ball.trail.shift(); // Longer trail
@@ -247,7 +247,7 @@ export class PongAnimation {
     }
     
     // Update Grid (Parallax effect)
-    this.gridOffset = (this.gridOffset + 1 + (this.LOW / 20)) % 40;
+    this.gridOffset = (this.gridOffset + 1 + (this.LOW / 80)) % 40;
   }
   
   // --- DRAWING ---

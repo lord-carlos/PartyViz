@@ -1,0 +1,22 @@
+<div id="view-debug-visualizer" class="animation-view">
+  <style>
+    /* Retro terminal style */
+    #view-debug-visualizer { --fg: #33ff66; --muted: #0f0f0f; font-family: "Courier New", monospace; color: var(--fg); background: #000; display:flex; align-items:stretch; }
+    #view-debug-visualizer .left { width: 320px; padding: 12px; box-sizing: border-box; background: rgba(0,0,0,0.7); border-right: 1px solid rgba(51,255,102,0.06); }
+    #view-debug-visualizer .left .title { font-weight:700; margin-bottom:8px; font-size:18px; }
+    #view-debug-visualizer .left .vals { white-space:pre-wrap; font-size:13px; line-height:1.4; color:var(--fg); text-shadow: 0 0 8px rgba(51,255,102,0.2); }
+    #view-debug-visualizer .canvas-wrap { flex:1; display:flex; align-items:center; justify-content:center; padding:12px; }
+    #canvas-debug-visualizer { width:100%; height:100%; display:block; background: #000; box-shadow: inset 0 0 40px rgba(0,255,150,0.02); border-radius:4px; }
+    #meta-debug-visualizer { margin-top:10px; color: rgba(51,255,102,0.8); font-size:12px }
+  </style>
+
+  <div class="left">
+    <div class="title">Audio Debug Visualizer</div>
+    <div id="label-debug-visualizer" class="vals">Initializing...</div>
+    <div id="meta-debug-visualizer" class="metadata"></div>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="canvas-debug-visualizer"></canvas>
+  </div>
+</div>

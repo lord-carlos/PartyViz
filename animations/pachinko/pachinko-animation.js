@@ -906,8 +906,8 @@ export class PachinkoAnimation {
     }
 
     // Enhanced screen shake on heavy bass
-    if (this.screenShakeEnabled && this.LOW > 85) {
-      const shakeIntensity = (this.LOW - 85) / 15 * 2;
+    if (this.screenShakeEnabled && this.LOW > 75) {
+      const shakeIntensity = (this.LOW - 75) / 15 * 2;
       this.screenShake.x = (Math.random() - 0.5) * shakeIntensity;
       this.screenShake.y = (Math.random() - 0.5) * shakeIntensity * 0.5;
     } else {
