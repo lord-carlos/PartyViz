@@ -27,6 +27,11 @@ export class SynthwaveRunAnimation {
     // Player offset target + smoothing for nicer motion
     this.playerOffset = 0;
     this.playerTargetOffset = 0;
+    this.speedMultiplier = this.config.settings?.speed_multiplier ?? 1;
+    this.time = 0;
+    this.gridOffset = 0;
+    this.width = 0;
+    this.height = 0;
 
     // 3D Camera Settings
     // camera height determines where the floor projects on screen; make it
@@ -38,6 +43,12 @@ export class SynthwaveRunAnimation {
     // Colors
     this.colorGrid = '#ff00ff'; // Magenta
     this.colorSun = '#ffcc00';  // Sunset Yellow
+
+    // Cached sun gradient (rebuilt only when its radius/position changes)
+    this._sunGrad = null;
+    this._sunRadiusCache = -1;
+    this._sunXCache = -1;
+    this._sunYCache = -1;
 
     // DOM Elements
     this.elSpeed = canvas.parentElement.querySelector('#synth-speed');
@@ -56,8 +67,8 @@ export class SynthwaveRunAnimation {
   }
 
   init() {
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    const w = this.width || this.canvas.width;
+    const h = this.height || this.canvas.height;
     this.horizonY = h * 0.45; // Horizon line height
 
     // Generate Stars
@@ -90,13 +101,35 @@ export class SynthwaveRunAnimation {
     this.high = high;
   }
 
-  start() {
-    // Resize handling
+  resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
-
+    const width = Math.max(1, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
+    this.width = width;
+    this.height = height;
+    this.canvas.width = Math.floor(width * dpr);
+    this.canvas.height = Math.floor(height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.init();
+  }
+
+  start() {
+    this.state = 'BOOT';
+    this.bootTimer = 0;
+    this.score = 0;
+    this.speed = 0;
+    this.entities = [];
+    this.playerOffset = 0;
+    this.playerTargetOffset = 0;
+    this.gridOffset = 0;
+
+    this.resize();
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this.resize();
+      window.addEventListener('resize', this._resizeHandler);
+    }
+
     if (!this.frameId) this.frameId = requestAnimationFrame(this.draw);
   }
 
@@ -104,6 +137,10 @@ export class SynthwaveRunAnimation {
     if (this.frameId) {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
+    }
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      this._resizeHandler = null;
     }
   }
 
@@ -114,7 +151,7 @@ export class SynthwaveRunAnimation {
   project(x, y, z) {
     if (z <= 0) return { x: x, y: y, scale: 1 }; // Clip
     const scale = this.fov / (this.fov + z);
-    const cx = this.canvas.width / 2;
+    const cx = (this.width || this.canvas.width) / 2;
     const cy = this.horizonY; // Vanishing point
     return {
       x: cx + (x * scale),
@@ -125,8 +162,9 @@ export class SynthwaveRunAnimation {
 
   draw = () => {
     const ctx = this.ctx;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    const w = this.width || this.canvas.width;
+    const h = this.height || this.canvas.height;
+    this.time++;
 
     // Clear
     // We use a slight trail effect for motion blur feeling
@@ -148,6 +186,11 @@ export class SynthwaveRunAnimation {
     ctx.fillStyle = '#0f0';
     ctx.font = '20px monospace';
     ctx.textAlign = 'center';
+    // Canvas state persists across stop()/start(): restore defaults the game
+    // loop changes so the boot screen isn't shifted by the last run.
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
 
     // Retro loading bars
     const progress = Math.min(1, this.bootTimer / 120); // 2 seconds boot
@@ -167,8 +210,9 @@ export class SynthwaveRunAnimation {
   drawGame(ctx, w, h) {
     // --- 1. UPDATE LOGIC ---
     // Speed based on Mid + constant forward motion
-    const moveSpeed = 5 + (this.mid * 0.2);
+    const moveSpeed = (5 + (this.mid * 0.2)) * this.speedMultiplier;
     this.speed = Math.floor(moveSpeed * 20);
+    this.gridOffset = (this.gridOffset + moveSpeed * 0.5) % 800;
 
     // HUD Update
     if (this.elSpeed) this.elSpeed.textContent = this.speed;
@@ -246,11 +290,21 @@ export class SynthwaveRunAnimation {
     const sunX = w / 2;
     const sunY = this.horizonY - 50;
 
-    const sunGrad = ctx.createLinearGradient(sunX, sunY - sunRadius, sunX, sunY + sunRadius);
-    sunGrad.addColorStop(0, '#ffff00');
-    sunGrad.addColorStop(1, '#ff00cc');
+    // Rebuild the gradient only on a >=2px radius change (or a resize/move);
+    // creating it every frame was the remaining per-frame allocation here.
+    if (!this._sunGrad
+      || Math.abs(sunRadius - this._sunRadiusCache) >= 2
+      || sunX !== this._sunXCache
+      || sunY !== this._sunYCache) {
+      this._sunGrad = ctx.createLinearGradient(sunX, sunY - sunRadius, sunX, sunY + sunRadius);
+      this._sunGrad.addColorStop(0, '#ffff00');
+      this._sunGrad.addColorStop(1, '#ff00cc');
+      this._sunRadiusCache = sunRadius;
+      this._sunXCache = sunX;
+      this._sunYCache = sunY;
+    }
 
-    ctx.fillStyle = sunGrad;
+    ctx.fillStyle = this._sunGrad;
     ctx.beginPath();
     ctx.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
     ctx.fill();
@@ -258,7 +312,7 @@ export class SynthwaveRunAnimation {
     // Sun "Blinds" (Horizontal cuts)
     ctx.fillStyle = 'rgba(10, 0, 20, 0.3)'; // Match bg color roughly
     for (let i = 0; i < 10; i++) {
-      const y = sunY - sunRadius + (i * (sunRadius / 4)) + (Date.now() / 50 % 20);
+      const y = sunY - sunRadius + (i * (sunRadius / 4)) + (this.time % 20);
       const hCut = 2 + i; // cuts get thicker towards bottom
       ctx.fillRect(sunX - sunRadius, y, sunRadius * 2, hCut);
     }
@@ -287,50 +341,47 @@ export class SynthwaveRunAnimation {
 
     // Grid Movement
     // We simulate movement by offsetting the Z of horizontal lines
-    // Increase grid motion range to match deeper horizon
-    const timeZ = (Date.now() * (5 / 10)) % 800;// was move speed
+    const timeZ = this.gridOffset;
 
     ctx.strokeStyle = 'rgba(255, 0, 255, 0.5)';
     ctx.lineWidth = 2;
     ctx.shadowBlur = 10 + (this.low * 0.2);
     ctx.shadowColor = '#ff00ff';
 
-    // Vertical Lines (Converging) - make the grid much wider and denser
-    // Primary dense grid
+    // Vertical lines (converging) — one batched path, one stroke.
+    ctx.beginPath();
     for (let x = -13000; x <= 13000; x += 175) {
       const p1 = this.project(x, this.camHeight, 1); // Near
       const p2 = this.project(x, this.camHeight, 4000); // Far
-      ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
     }
+    ctx.stroke();
 
-    // Horizontal Lines (Moving towards camera)
+    // Horizontal lines (moving towards camera) — batched as well.
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
     for (let z = 0; z < 4000; z += 100) {
-      // Apply offset for movement
-      let currentZ = z - timeZ;
-      if (currentZ < 10) currentZ += 2000; // Wrap around
+      // Apply offset for movement. Wrap modulo the grid depth so lines stay on
+      // the same 100-unit spacing (the old fixed +2000 re-added duplicates).
+      // Clamp to 1 so a line never hits project()'s z <= 0 clip branch.
+      const currentZ = Math.max(1, ((z - timeZ) % 4000 + 4000) % 4000);
 
       const p1 = this.project(-3000, this.camHeight, currentZ);
       const p2 = this.project(3000, this.camHeight, currentZ);
-
-      // Distance fade
-      ctx.globalAlpha = 1 - (currentZ / 2000);
-
-      ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
     }
+    ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
     ctx.restore();
 
     // --- 4. ENTITIES (Names) ---
 
-    // Sort by Z (Painter's algo) - draw far ones first
-    this.entities.sort((a, b) => b.z - a.z);
+    // Sort ascending (near -> far). The loop below walks backwards, so distant
+    // names are painted first and close ones last (painter's order).
+    this.entities.sort((a, b) => a.z - b.z);
 
     ctx.font = 'bold 40px "Courier New"';
     ctx.textAlign = 'center';
@@ -494,5 +545,8 @@ export class SynthwaveRunAnimation {
     ctx.lineTo(px, this.horizonY);
     ctx.stroke();
     ctx.globalAlpha = 1;
+    // Reset the player glow so the next frame's full-canvas clear/trail fill
+    // doesn't inherit shadowBlur (that forced an extra shadow pass per frame).
+    ctx.shadowBlur = 0;
   }
 }

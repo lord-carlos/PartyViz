@@ -20,6 +20,9 @@ export class FractalVortexAnimation {
         this.names = ["VOID", "ECHO", "PULSE"];
         this.activeNames = []; // { text, r (radius), theta (angle), size, color }
         this.nameCooldown = 0;
+        this.width = 0;
+        this.height = 0;
+        this._resizeHandler = () => this.resize();
 
         this.fetchNames();
     }
@@ -38,10 +41,21 @@ export class FractalVortexAnimation {
         this.high = high;
     }
 
-    start() {
+    resize() {
         const rect = this.canvas.getBoundingClientRect();
-        this.canvas.width = rect.width;
-        this.canvas.height = rect.height;
+        const width = Math.max(1, Math.floor(rect.width));
+        const height = Math.max(1, Math.floor(rect.height));
+        const dpr = window.devicePixelRatio || 1;
+        this.width = width;
+        this.height = height;
+        this.canvas.width = Math.floor(width * dpr);
+        this.canvas.height = Math.floor(height * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    start() {
+        this.resize();
+        window.addEventListener('resize', this._resizeHandler);
 
         if (!this.frameId) {
             this.frameId = requestAnimationFrame(this.draw);
@@ -53,6 +67,7 @@ export class FractalVortexAnimation {
             cancelAnimationFrame(this.frameId);
             this.frameId = null;
         }
+        window.removeEventListener('resize', this._resizeHandler);
     }
 
     spawnName() {
@@ -77,8 +92,8 @@ export class FractalVortexAnimation {
 
     draw = () => {
         const ctx = this.ctx;
-        const w = this.canvas.width;
-        const h = this.canvas.height;
+        const w = this.width;
+        const h = this.height;
         const cx = w / 2;
         const cy = h / 2;
 
@@ -117,8 +132,6 @@ export class FractalVortexAnimation {
             // Each layer rotates slightly relative to the last
             // Creates the spiral tunnel
             const layerAngle = (i * 0.02) * this.rotation;
-            const scale = 1 + (i * 0.15) + (Math.sin(this.time) * 0.1);
-
             ctx.rotate(layerAngle);
 
             // Determine Color for this layer
@@ -162,6 +175,13 @@ export class FractalVortexAnimation {
         ctx.save();
         ctx.translate(cx, cy);
 
+        // These are constant for the whole batch: set them once, not per name.
+        ctx.shadowBlur = 10;
+        ctx.textAlign = "center";
+        // Font size depends on radius, but only quantized integer sizes are
+        // worth a re-parse; track the last size actually applied.
+        let lastFontPx = -1;
+
         for (let i = this.activeNames.length - 1; i >= 0; i--) {
             let n = this.activeNames[i];
 
@@ -169,7 +189,7 @@ export class FractalVortexAnimation {
             n.r += 0.03 + (this.low * 0.04); // Bass boosts speed
             // Rotate with the vortex
             n.theta += 0.01;
-            n.alpha = Math.min(1, n.r / 100); // Fade in
+            // Fade in based on distance from center
 
             // Remove if off screen
             if (n.r > Math.max(w, h)) {
@@ -180,17 +200,20 @@ export class FractalVortexAnimation {
             const nx = Math.cos(n.theta) * n.r;
             const ny = Math.sin(n.theta) * n.r;
 
+            // Font is transform-independent: set it before save() so the
+            // per-name save/restore doesn't roll the face back each time.
+            const fontPx = Math.round(10 + (n.r / 10)); // Grow as they get closer
+            if (fontPx !== lastFontPx) {
+                ctx.font = `bold ${fontPx}px monospace`;
+                lastFontPx = fontPx;
+            }
+
             ctx.save();
             ctx.translate(nx, ny);
             ctx.rotate(n.theta + Math.PI / 2); // Align text tangentially
 
-            // Text Style
-            const fontSize = 10 + (n.r / 10); // Grow as they get closer
-            ctx.font = `bold ${fontSize}px monospace`;
             ctx.fillStyle = n.color;
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = n.color;
-            ctx.textAlign = "center";
+            ctx.shadowColor = n.color; // per-name color; blur/align set once above
 
             ctx.fillText(n.text, 0, 0);
 

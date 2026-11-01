@@ -19,6 +19,10 @@ export class HackerTerminalAnimation {
         // -- State: Matrix --
         this.matrixColumns = [];
         this.matrixFontSize = 14;
+        this.width = 0;
+        this.height = 0;
+        this.primaryColor = '#0f0';
+        this._resizeHandler = () => this.resize();
 
         // -- State: Globe --
         this.spherePoints = [];
@@ -87,17 +91,27 @@ export class HackerTerminalAnimation {
     }
 
     initMatrix(height) {
-        const cols = Math.floor((this.canvas.width * 0.33) / this.matrixFontSize);
+        const cols = Math.floor(((this.width || this.canvas.width) * 0.33) / this.matrixFontSize);
         this.matrixColumns = Array(cols).fill(0).map(() => Math.random() * height);
     }
 
-    start() {
-        // Handle resolution
+    resize() {
         const rect = this.canvas.getBoundingClientRect();
-        this.canvas.width = rect.width;
-        this.canvas.height = rect.height;
+        const width = Math.max(1, Math.floor(rect.width));
+        const height = Math.max(1, Math.floor(rect.height));
+        const dpr = window.devicePixelRatio || 1;
+        this.width = width;
+        this.height = height;
+        this.canvas.width = Math.floor(width * dpr);
+        this.canvas.height = Math.floor(height * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.primaryColor = getComputedStyle(this.canvas).getPropertyValue('--color-primary').trim() || '#0f0';
+        this.initMatrix(this.height / 2);
+    }
 
-        this.initMatrix(this.canvas.height / 2);
+    start() {
+        this.resize();
+        window.addEventListener('resize', this._resizeHandler);
 
         if (!this.frameId) {
             this.frameId = requestAnimationFrame(this.draw);
@@ -109,6 +123,7 @@ export class HackerTerminalAnimation {
             cancelAnimationFrame(this.frameId);
             this.frameId = null;
         }
+        window.removeEventListener('resize', this._resizeHandler);
     }
 
     // --- 3D Projection Logic ---
@@ -125,11 +140,10 @@ export class HackerTerminalAnimation {
 
     draw = () => {
         const ctx = this.ctx;
-        const w = this.canvas.width;
-        const h = this.canvas.height;
+        const w = this.width;
+        const h = this.height;
 
-        // Fetch colors from CSS (fallback to #0f0)
-        const primaryColor = getComputedStyle(this.canvas).getPropertyValue('--color-primary').trim() || '#0f0';
+        const primaryColor = this.primaryColor;
 
         // Clear Screen
         ctx.fillStyle = '#000';

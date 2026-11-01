@@ -111,6 +111,8 @@ export class WireframePlanetAnimation {
     // Mouse interaction (Phase 4)
     this.mouse = { x: 0, y: 0 };
     this.raycaster = new THREE.Raycaster();
+    this._mouseVec = new THREE.Vector2();
+    this._hoverFrame = 0;
     this.hoveredName = null;
 
     console.log('[wireframe-planet] Constructor completed');
@@ -143,6 +145,7 @@ export class WireframePlanetAnimation {
   init() {
     console.log('[wireframe-planet] Initializing 3D scene...');
 
+    if (this.scene) return; // start() can be called again after a pause
     if (!this.webglSupported) {
       console.error('[wireframe-planet] WebGL is not supported in this browser');
       this.showWebGLError();
@@ -156,7 +159,7 @@ export class WireframePlanetAnimation {
 
       // Setup camera
       const aspect = this.canvas.width / this.canvas.height;
-      this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+      this.camera = new THREE.PerspectiveCamera(75, aspect || 1, 0.1, 1000);
       this.camera.position.set(this.cameraDistance, this.cameraHeight, 0);
       this.camera.lookAt(0, 0, 0);
 
@@ -164,12 +167,11 @@ export class WireframePlanetAnimation {
       this.renderer = new THREE.WebGLRenderer({
         canvas: this.canvas,
         antialias: true,
-        alpha: true,
-        preserveDrawingBuffer: true
+        alpha: true
       });
 
-      this.renderer.setSize(this.canvas.width, this.canvas.height);
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this.renderer.setSize(this.canvas.width, this.canvas.height, false);
       this.renderer.setClearColor(0x000000, 1);
 
       // Try to setup post-processing (Phase 4)
@@ -225,16 +227,23 @@ export class WireframePlanetAnimation {
 
   // Phase 4: Setup mouse interaction
   setupMouseInteraction() {
-    this.canvas.addEventListener('mousemove', (event) => {
+    if (this._mouseMoveHandler) return;
+    this._mouseMoveHandler = (event) => {
       const rect = this.canvas.getBoundingClientRect();
       this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    });
+    };
+    this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
   }
 
   showWebGLError() {
+    // start() is idempotent; never stack a second overlay on a repeated call.
+    const viewContainer = this.canvas.closest('.animation-view');
+    if (!viewContainer || viewContainer.querySelector('.webgl-error-overlay')) return;
+
     // Create error message as HTML overlay
     const errorDiv = document.createElement('div');
+    errorDiv.className = 'webgl-error-overlay';
     errorDiv.style.cssText = `
       position: absolute;
       top: 50%;
@@ -255,10 +264,7 @@ export class WireframePlanetAnimation {
       <div style="color: #00ffff; font-size: 16px; margin-top: 10px;">Please try a different browser</div>
     `;
 
-    const viewContainer = this.canvas.closest('.animation-view');
-    if (viewContainer) {
-      viewContainer.appendChild(errorDiv);
-    }
+    viewContainer.appendChild(errorDiv);
   }
 
   createMaterials() {
@@ -381,8 +387,18 @@ export class WireframePlanetAnimation {
   initializeParticleTrails() {
     console.log('[wireframe-planet] Initializing particle trails...');
 
-    // Create trail geometry and material
+    // Fixed-size trail buffer: no per-frame attribute/array allocation.
+    this.trailCapacity = Math.max(300, this.particleCount * 3 * 10);
+    this.trailArray = new Float32Array(this.trailCapacity);
+    this.trailScratch = new Float32Array(this.particleCount * 3);
+    this.trailLength = 0;
+
     this.trailGeometry = new THREE.BufferGeometry();
+    this.trailAttribute = new THREE.BufferAttribute(this.trailArray, 3);
+    this.trailAttribute.setUsage(THREE.DynamicDrawUsage);
+    this.trailGeometry.setAttribute('position', this.trailAttribute);
+    this.trailGeometry.setDrawRange(0, 0);
+
     this.trailMaterial = new THREE.LineBasicMaterial({
       color: this.particleColor,
       transparent: true,
@@ -390,7 +406,6 @@ export class WireframePlanetAnimation {
       blending: THREE.AdditiveBlending
     });
 
-    // Initialize trail points array
     this.trailPoints = [];
 
     console.log('[wireframe-planet] Particle trails initialized');
@@ -481,8 +496,12 @@ export class WireframePlanetAnimation {
     // Create name sprite
     const sprite = this.createNameSprite(randomName);
 
-    // Create connection line geometry
+    // Create connection line geometry. Preallocate the two-point buffer so the
+    // draw loop updates it in place instead of allocating every frame.
     const lineGeometry = new THREE.BufferGeometry();
+    const linePositions = new Float32Array(6);
+    lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+    lineGeometry.setDrawRange(0, 2);
     const lineMaterial = new THREE.LineBasicMaterial({
       color: this.nameColor,
       transparent: true,
@@ -494,6 +513,7 @@ export class WireframePlanetAnimation {
     const floatingName = {
       sprite: sprite,
       line: line,
+      linePositions: linePositions,
       name: randomName,
       orbitRadius: orbitRadius,
       orbitSpeed: orbitSpeed,
@@ -524,6 +544,15 @@ export class WireframePlanetAnimation {
     this.scene.remove(floatingName.sprite);
     this.scene.remove(floatingName.line);
 
+    // Release the sprite texture/material and the line resources. These objects
+    // are already out of the scene, so stop()'s traversal cannot reach them.
+    if (floatingName.sprite.material) {
+      if (floatingName.sprite.material.map) floatingName.sprite.material.map.dispose();
+      floatingName.sprite.material.dispose();
+    }
+    floatingName.line.geometry.dispose();
+    if (floatingName.line.material) floatingName.line.material.dispose();
+
     // Remove from arrays
     this.floatingNames.splice(index, 1);
     this.nameSprites.splice(index, 1);
@@ -545,12 +574,11 @@ export class WireframePlanetAnimation {
       // Update sprite position
       name.sprite.position.set(x, y, z);
 
-      // Update connection line
-      const linePositions = new Float32Array([
-        0, 0, 0,  // Planet center
-        x, y, z    // Name position
-      ]);
-      name.line.geometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+      // Update connection line in place (planet center -> name position).
+      name.linePositions[3] = x;
+      name.linePositions[4] = y;
+      name.linePositions[5] = z;
+      name.line.geometry.attributes.position.needsUpdate = true;
 
       // Update age and lifetime
       name.age++;
@@ -596,8 +624,14 @@ export class WireframePlanetAnimation {
 
   // Phase 4: Check for name hover
   checkNameHover() {
-    // Update raycaster with mouse position
-    this.raycaster.setFromCamera(new THREE.Vector2(this.mouse.x, this.mouse.y), this.camera);
+    if (!this.nameSprites.length) return;
+
+    // Raycasting every frame for four sprites is wasted work; 20 Hz is plenty.
+    this._hoverFrame = (this._hoverFrame + 1) % 3;
+    if (this._hoverFrame !== 0) return;
+
+    this._mouseVec.set(this.mouse.x, this.mouse.y);
+    this.raycaster.setFromCamera(this._mouseVec, this.camera);
 
     // Check for intersections with name sprites
     const intersects = this.raycaster.intersectObjects(this.nameSprites);
@@ -632,41 +666,43 @@ export class WireframePlanetAnimation {
 
   // Phase 4: Update particle trails
   updateParticleTrails() {
-    // Add current particle positions to trail points
-    if (this.particles) {
-      const positions = this.particles.geometry.attributes.position.array;
+    if (!this.particles || !this.trailAttribute || !this.trailArray) return;
 
-      for (let i = 0; i < this.particleCount; i++) {
-        const lifetime = this.particles.geometry.attributes.lifetime.array[i];
+    const positions = this.particles.geometry.attributes.position.array;
+    const lifetimes = this.particles.geometry.attributes.lifetime.array;
+    const scratch = this.trailScratch;
+    let scratchLength = 0;
 
-        if (lifetime > 0) {
-          // Add position to trail
-          this.trailPoints.push(
-            positions[i * 3],
-            positions[i * 3 + 1],
-            positions[i * 3 + 2]
-          );
-
-          // Limit trail length
-          if (this.trailPoints.length > this.particleCount * 3 * 10) {
-            this.trailPoints.splice(0, 3);
-          }
-        }
+    for (let i = 0; i < this.particleCount; i++) {
+      if (lifetimes[i] > 0) {
+        scratch[scratchLength++] = positions[i * 3];
+        scratch[scratchLength++] = positions[i * 3 + 1];
+        scratch[scratchLength++] = positions[i * 3 + 2];
       }
+    }
 
-      // Update trail geometry
-      if (this.trailPoints.length > 0) {
-        this.trailGeometry.setAttribute(
-          'position',
-          new THREE.BufferAttribute(new Float32Array(this.trailPoints), 3)
-        );
+    if (scratchLength === 0) return;
 
-        // Create or update trail line
-        if (!this.trailLine) {
-          this.trailLine = new THREE.Line(this.trailGeometry, this.trailMaterial);
-          this.scene.add(this.trailLine);
-        }
-      }
+    // Make room by discarding the oldest points, then copy new points in.
+    if (this.trailLength + scratchLength > this.trailCapacity) {
+      const overflow = this.trailLength + scratchLength - this.trailCapacity;
+      this.trailArray.copyWithin(0, overflow, this.trailLength);
+      this.trailLength -= overflow;
+    }
+    for (let i = 0; i < scratchLength; i++) {
+      this.trailArray[this.trailLength + i] = scratch[i];
+    }
+    this.trailLength += scratchLength;
+
+    this.trailAttribute.needsUpdate = true;
+    this.trailGeometry.setDrawRange(0, this.trailLength / 3);
+
+    if (!this.trailLine) {
+      this.trailLine = new THREE.Line(this.trailGeometry, this.trailMaterial);
+      // The draw range grows every frame while the cached bounding sphere does
+      // not, so frustum culling could hide the trail as it extends.
+      this.trailLine.frustumCulled = false;
+      this.scene.add(this.trailLine);
     }
   }
 
@@ -824,7 +860,10 @@ export class WireframePlanetAnimation {
   }
 
   draw = () => {
-    if (!this.webglSupported || !this.renderer) {
+    if (!this.webglSupported || !this.renderer || !this.scene || !this.camera) {
+      // Drop the stale frame id so a later start() does not think a loop is
+      // already running while nothing is scheduled.
+      this.frameId = null;
       return;
     }
 
@@ -862,24 +901,36 @@ export class WireframePlanetAnimation {
     this.HIGH = high;
   }
 
+  resize() {
+    if (!this.renderer || !this.camera) return;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+    this.camera.aspect = rect.width / rect.height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(rect.width, rect.height, false);
+    if (this.composer) this.composer.setSize(rect.width, rect.height);
+  }
+
   start() {
     console.log('[wireframe-planet] Starting animation...');
 
-    // Handle Resolution
+    // Handle resolution
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    if (rect.width > 2 && rect.height > 2) {
+      this.canvas.width = rect.width;
+      this.canvas.height = rect.height;
+    }
 
-    console.log('[wireframe-planet] Canvas size set to:', this.canvas.width, 'x', this.canvas.height);
-
-    // Initialize 3D scene
     this.init();
+    this.resize();
 
-    if (!this.frameId && this.webglSupported) {
-      console.log('[wireframe-planet] Starting animation frame loop');
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this.resize();
+      window.addEventListener('resize', this._resizeHandler);
+    }
+
+    if (!this.frameId && this.webglSupported && this.renderer) {
       this.frameId = requestAnimationFrame(this.draw);
-    } else {
-      console.log('[wireframe-planet] Animation already running or WebGL not supported');
     }
   }
 
@@ -890,28 +941,68 @@ export class WireframePlanetAnimation {
       this.frameId = null;
     }
 
-    // Clean up Three.js resources
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      this._resizeHandler = null;
+    }
+    if (this._mouseMoveHandler) {
+      this.canvas.removeEventListener('mousemove', this._mouseMoveHandler);
+      this._mouseMoveHandler = null;
+    }
+
+    // Clean up post-processing before the renderer/scene.
+    try {
+      if (this.bloomPass && this.bloomPass.dispose) this.bloomPass.dispose();
+      if (this.renderPass && this.renderPass.dispose) this.renderPass.dispose();
+      if (this.composer && this.composer.dispose) this.composer.dispose();
+    } catch (err) {
+      console.warn('[wireframe-planet] Error disposing composer', err);
+    }
+
     if (this.renderer) {
       this.renderer.dispose();
     }
 
-    // Clear scene
+    // Clear scene (recursive: names and trail are children of the scene).
     if (this.scene) {
-      while (this.scene.children.length > 0) {
-        const child = this.scene.children[0];
+      this.scene.traverse((child) => {
         if (child.geometry) child.geometry.dispose();
         if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(material => material.dispose());
-          } else {
-            child.material.dispose();
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (const material of materials) {
+            if (material.map) material.map.dispose();
+            material.dispose();
           }
         }
-        this.scene.remove(child);
-      }
+      });
+      this.scene.clear();
     }
 
-    // Clear arrays
+    // Clear arrays and allow a clean restart.
+    this.scene = null;
+    this.camera = null;
+    this.renderer = null;
+    this.planet = null;
+    this.starfield = null;
+    this.composer = null;
+    this.renderPass = null;
+    this.bloomPass = null;
+    this.particles = null;
+    this.planetMaterial = null;
+    // The trail line is created lazily; if no particle ever fired it never
+    // entered the scene, so traversal above could not release its buffer.
+    if (!this.trailLine) {
+      if (this.trailGeometry) this.trailGeometry.dispose();
+      if (this.trailMaterial) this.trailMaterial.dispose();
+    }
+    this.trailLine = null;
+    this.trailGeometry = null;
+    this.trailMaterial = null;
+    this.trailAttribute = null;
+    this.trailArray = null;
+    this.trailScratch = null;
+    this.trailLength = 0;
+
     this.floatingNames = [];
     this.nameSprites = [];
     this.connectionLines = [];
@@ -919,11 +1010,23 @@ export class WireframePlanetAnimation {
     this.particleTrails = [];
     this.trailPoints = [];
 
+    // Reset interaction/animation state so a restart begins cleanly.
+    this.hoveredName = null;
+    this._hoverFrame = 0;
+    this.mouse.x = 0;
+    this.mouse.y = 0;
+    this.time = 0;
+    this.cameraAngle = 0;
+    this.nameSpawnTimer = 0;
+    this.planetPulse = 0;
+    this.cameraShake.x = 0;
+    this.cameraShake.y = 0;
+    this.cameraShake.z = 0;
+
     // Remove any error messages
     const viewContainer = this.canvas.closest('.animation-view');
     if (viewContainer) {
-      const errorDivs = viewContainer.querySelectorAll('div[style*="WebGL not supported"]');
-      errorDivs.forEach(div => div.remove());
+      viewContainer.querySelectorAll('.webgl-error-overlay').forEach((div) => div.remove());
     }
   }
 }

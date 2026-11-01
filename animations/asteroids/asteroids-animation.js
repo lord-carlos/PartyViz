@@ -31,6 +31,12 @@ export class AsteroidsAnimation {
         this.lastTime = null;
         this.initialized = false;
 
+        // Offscreen cache for the static starfield (rebuilt only on resize)
+        this._starCanvas = null;
+        this._starWidth = 0;
+        this._starHeight = 0;
+        this._starDpr = 0;
+
         // allow config overrides
         if (config && config.settings) {
             const s = config.settings;
@@ -44,19 +50,19 @@ export class AsteroidsAnimation {
 
         // Prepare asteroids (will use canvas size to place them)
         this.resize();
-        // If resize reports a width/height of 0, defer initialization until next animation frame
-        if (!this.width || !this.height) {
-            console.log('[Asteroids] Delaying initialization until canvas layout completes', this.width, this.height);
-            requestAnimationFrame(() => {
-                this.resize();
-                this._initAsteroids();
-                this.initialized = true;
-            });
-        } else {
+        if (this.width && this.height) {
             this._initAsteroids();
             this.initialized = true;
         }
-        window.addEventListener('resize', () => { this.resize(); this._packAsteroids(); });
+        this._resizeHandler = () => {
+            this.resize();
+            if (!this.initialized) {
+                this._initAsteroids();
+                this.initialized = true;
+            } else {
+                this._packAsteroids();
+            }
+        };
     }
 
     // Mandatory hook: (low, mid, high) values are 0..100
@@ -77,7 +83,38 @@ export class AsteroidsAnimation {
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.width = rect.width;
         this.height = rect.height;
-        console.log(`[Asteroids] resize() -> width=${this.width}, height=${this.height}, dpr=${dpr}`);
+
+        // Rebuild the cached starfield only when the backing size actually changes.
+        const cssW = Math.max(1, Math.floor(this.width));
+        const cssH = Math.max(1, Math.floor(this.height));
+        if (!this._starCanvas || cssW !== this._starWidth || cssH !== this._starHeight || dpr !== this._starDpr) {
+            this._buildStarfield(cssW, cssH, dpr);
+        }
+    }
+
+    _buildStarfield(cssW, cssH, dpr) {
+        // Draw the faint dots once into an offscreen canvas; the frame loop then
+        // blits it with a single drawImage instead of clearing + 50 arcs.
+        if (!this._starCanvas) this._starCanvas = document.createElement('canvas');
+        const sc = this._starCanvas;
+        sc.width = Math.max(1, Math.floor(cssW * dpr));
+        sc.height = Math.max(1, Math.floor(cssH * dpr));
+        const sctx = sc.getContext('2d');
+        sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        sctx.fillStyle = '#000';
+        sctx.fillRect(0, 0, cssW, cssH);
+        sctx.globalCompositeOperation = 'lighter';
+        sctx.fillStyle = 'rgba(51, 255, 0, 0.02)';
+        for (let i = 0; i < 50; i++) {
+            // same reproducible star positions/sizes as before
+            const x = (i * 67) % cssW;
+            const y = (i * 43) % cssH;
+            const r = (i % 3) + 0.5;
+            sctx.beginPath(); sctx.arc(x, y, r, 0, Math.PI * 2); sctx.fill();
+        }
+        this._starWidth = cssW;
+        this._starHeight = cssH;
+        this._starDpr = dpr;
     }
 
     _initAsteroids() {
@@ -193,21 +230,9 @@ export class AsteroidsAnimation {
     }
 
     _drawStars() {
-        // simple static small dots that are drawn as a faint star field
-        const ctx = this.ctx;
-        ctx.save();
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, this.width, this.height);
-        ctx.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < 50; i++) {
-            // reproducible-ish starfield by seeded value - but it's fine random
-            const x = (i * 67) % this.width;
-            const y = (i * 43) % this.height;
-            const r = (i % 3) + 0.5;
-            ctx.fillStyle = `rgba(51, 255, 0, 0.02)`;
-            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.restore();
+        // Opaque cached starfield (black + faint dots): one blit per frame.
+        if (!this._starCanvas) return;
+        this.ctx.drawImage(this._starCanvas, 0, 0, this.width, this.height);
     }
 
     _drawAsteroid(a, s, react) {
@@ -257,6 +282,7 @@ export class AsteroidsAnimation {
                 this._initAsteroids();
                 this.initialized = true;
             }
+            window.addEventListener('resize', this._resizeHandler);
             this.frameId = requestAnimationFrame(this.drawFrame);
         }
     }
@@ -268,5 +294,6 @@ export class AsteroidsAnimation {
             cancelAnimationFrame(this.frameId);
             this.frameId = null;
         }
+        window.removeEventListener('resize', this._resizeHandler);
     }
 }

@@ -17,6 +17,11 @@ export class RadarScanAnimation {
     this.names = ["MIG-29", "UFO-X", "DRONE", "SU-57", "F-22", "UNKNOWN"];
     this.logs = []; // Scrolling text log
 
+    // Deterministic timing/counters (keeps Math.random() out of the draw path)
+    this.spawnAccumulator = 0;
+    this.spawnSeq = 0;
+    this.logSeq = 0;
+
     // Visual Juice State
     this.hue = 180; // Start Cyan
     this.alertLevel = 0; // 0 = Calm, 1 = DANGER
@@ -27,6 +32,10 @@ export class RadarScanAnimation {
     this.originX = 0;
     this.originY = 0;
     this.radius = 0;
+    this.width = 0;
+    this.height = 0;
+    this.time = 0;
+    this._resizeHandler = () => this.resize();
 
     this.fetchNames();
 
@@ -44,10 +53,19 @@ export class RadarScanAnimation {
     } catch (e) { }
   }
 
+  // Deterministic pseudo-random in [0, 1) from a seed. Same look as Math.random
+  // but reproducible, so the draw path never touches the global RNG.
+  _pseudo(seed) {
+    const v = Math.sin(seed * 12.9898) * 43758.5453;
+    return v - Math.floor(v);
+  }
+
   addLog() {
     const prefixes = ["SYS", "NET", "RAD", "WEP"];
-    const hex = Math.floor(Math.random() * 16777215).toString(16).toUpperCase();
-    this.logs.push(`${prefixes[Math.floor(Math.random() * prefixes.length)]} :: ${hex} :: OK`);
+    this.logSeq++;
+    const hex = Math.floor(this._pseudo(this.logSeq * 1.37) * 16777215).toString(16).toUpperCase();
+    const prefix = prefixes[Math.min(prefixes.length - 1, Math.floor(this._pseudo(this.logSeq * 2.11) * prefixes.length))];
+    this.logs.push(`${prefix} :: ${hex} :: OK`);
     if (this.logs.length > 8) this.logs.shift();
   }
 
@@ -57,15 +75,27 @@ export class RadarScanAnimation {
     this.high = high;
   }
 
-  start() {
+  resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    const width = Math.max(1, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
 
-    this.originX = this.canvas.width / 2;
-    this.originY = this.canvas.height - 80; // Lifted up for bottom HUD
-    this.radius = Math.min(this.canvas.width * 0.85, this.canvas.height * 0.85);
+    this.width = width;
+    this.height = height;
+    this.canvas.width = Math.floor(width * dpr);
+    this.canvas.height = Math.floor(height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    this.originX = width / 2;
+    this.originY = height - 80; // Lifted up for bottom HUD
+    this.radius = Math.min(width * 0.85, height * 0.85);
+  }
+
+  start() {
+    this.resize();
+    if (!this._resizeHandler) this._resizeHandler = () => this.resize();
+    window.addEventListener('resize', this._resizeHandler);
     if (!this.frameId) this.frameId = requestAnimationFrame(this.draw);
   }
 
@@ -74,6 +104,7 @@ export class RadarScanAnimation {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    window.removeEventListener('resize', this._resizeHandler);
   }
 
   toRad(deg) { return -deg * (Math.PI / 180); }
@@ -103,8 +134,8 @@ export class RadarScanAnimation {
     if (this.scanAngle >= 135) { this.scanAngle = 135; this.scanDirection = -1; }
     if (this.scanAngle <= 45) { this.scanAngle = 45; this.scanDirection = 1; }
 
-    // 5. Log update (Randomly based on high freq)
-    if (Math.random() < (this.high / 5000)) this.addLog();
+    // 5. Log update (pseudo-random cadence driven by high freq)
+    if (this._pseudo(this.time * 0.37 + 1.3) < (this.high / 5000)) this.addLog();
 
     // 6. Compass Movement
     this.compassOffset += this.scanDirection * speed;
@@ -112,8 +143,9 @@ export class RadarScanAnimation {
 
   draw = () => {
     const ctx = this.ctx;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    const w = this.width;
+    const h = this.height;
+    this.time++;
 
     this.updateState();
 
@@ -128,9 +160,13 @@ export class RadarScanAnimation {
     ctx.save();
 
     // --- SCREEN SHAKE ---
+    // Deterministic jitter: two offset sine waves per axis (same +/- range as
+    // the old random jitter, no Math.random() in the draw loop).
     if (this.shake > 0) {
-      const dx = (Math.random() - 0.5) * this.shake;
-      const dy = (Math.random() - 0.5) * this.shake;
+      const t = this.time;
+      const amp = this.shake * 0.5;
+      const dx = (Math.sin(t * 1.7) * 0.7 + Math.sin(t * 4.3 + 1.1) * 0.3) * amp;
+      const dy = (Math.sin(t * 2.3 + 2.4) * 0.7 + Math.sin(t * 5.1 + 0.7) * 0.3) * amp;
       ctx.translate(dx, dy);
     }
 
@@ -182,7 +218,7 @@ export class RadarScanAnimation {
     ctx.fillStyle = color;
     ctx.fillRect(20, altY, 2, altH);
     // Moving indicator
-    const indY = altY + altH - (Math.min(this.mid, 255) / 255 * altH);
+    const indY = altY + altH - (Math.max(0, Math.min(this.mid, 100)) / 100 * altH);
     ctx.fillRect(10, indY, 20, 4);
     ctx.fillText(`ALT: ${Math.floor(this.mid * 10)}`, 35, indY + 5);
 
@@ -203,7 +239,8 @@ export class RadarScanAnimation {
     ctx.textAlign = "center";
     ctx.font = "bold 16px monospace";
     if (this.alertLevel > 0.8) {
-      ctx.fillStyle = `rgba(255, 0, 0, ${Math.random() > 0.5 ? 1 : 0.2})`;
+      const flash = Math.sin(this.time * 0.5) > 0 ? 1 : 0.2;
+      ctx.fillStyle = `rgba(255, 0, 0, ${flash})`;
       ctx.fillText("!!! WARNING: COMBAT IMMINENT !!!", w / 2, h - 20);
     } else {
       ctx.fillStyle = color;
@@ -227,7 +264,7 @@ export class RadarScanAnimation {
     ctx.stroke();
 
     // Pulsing Arcs
-    const pulse = (Date.now() / 1000) % 1; // 0 to 1
+    const pulse = (this.time / 60) % 1; // 0 to 1
     const rings = 5;
     for (let i = 1; i <= rings; i++) {
       ctx.beginPath();
@@ -262,17 +299,29 @@ export class RadarScanAnimation {
   }
 
   manageTargets(ctx, color) {
-    // Spawn logic (Music driven)
-    if (this.targets.length < 4 && Math.random() < (0.005 + this.high / 10000)) {
-      const angle = 50 + Math.random() * 80;
-      const dist = 100 + Math.random() * (this.radius - 150);
-      const name = this.names[Math.floor(Math.random() * this.names.length)];
-      this.targets.push({
-        angle, dist, name,
-        opacity: 0,
-        detected: false,
-        lockRotation: 0
-      });
+    // Spawn logic (Music driven): accumulate timing instead of rolling a
+    // per-frame random chance. 0.005/frame average is preserved.
+    if (this.targets.length < 4) {
+      this.spawnAccumulator += 0.005 + (this.high / 10000);
+      if (this.spawnAccumulator >= 1) {
+        this.spawnAccumulator = 0;
+        this.spawnSeq++;
+        const s = this.spawnSeq;
+        const maxDist = Math.max(1, this.radius - 150);
+        const angle = 50 + this._pseudo(s * 1.7) * 80;
+        const dist = 100 + this._pseudo(s * 3.1 + 11.7) * maxDist;
+        const nameIndex = Math.min(this.names.length - 1, Math.floor(this._pseudo(s * 5.3 + 7.9) * this.names.length));
+        this.targets.push({
+          angle,
+          dist,
+          name: this.names[nameIndex],
+          opacity: 0,
+          detected: false,
+          lockRotation: 0
+        });
+      }
+    } else {
+      this.spawnAccumulator = 0;
     }
 
     // Update & Draw
@@ -326,8 +375,10 @@ export class RadarScanAnimation {
           ctx.font = "10px monospace";
 
           const xOff = 25;
-          // Glitch the text position with High freq
-          const glitchY = (this.high > 100) ? (Math.random() * 4) : 0;
+          // Glitch the text position with High freq (deterministic per target)
+          const glitchY = (this.high > 65)
+            ? this._pseudo(this.time * 0.9 + i * 7.3 + t.angle) * 4
+            : 0;
 
           ctx.fillText(t.name, tx + xOff, ty - 10 + glitchY);
           ctx.fillText(`DST: ${Math.floor(t.dist)}m`, tx + xOff, ty + glitchY);

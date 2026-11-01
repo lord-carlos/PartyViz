@@ -13,6 +13,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  /* Optional: Add a subtle CRT glow/blur via CSS */
-  filter: drop-shadow(0 0 2px rgba(0, 255, 0, 0.5));
+  /* Static CRT vignette glow. An inset box-shadow is composited once, unlike
+     `filter: drop-shadow(...)` which forced a full-canvas filter pass per frame. */
+  box-shadow: inset 0 0 40px rgba(0, 255, 0, 0.14);
 }

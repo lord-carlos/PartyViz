@@ -33,21 +33,40 @@ export class TankDriveAnimation {
     this.tankWidth = 80;
     this.tankHeight = 40;
     this.treadOffset = 0;
+
+    this.width = 0;
+    this.height = 0;
+    this.primaryColor = '#0f0';
+    this.bgColor = '#000';
+    this._resizeHandler = () => {
+      this.resize();
+      this.init();
+    };
+  }
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
+    this.width = width;
+    this.height = height;
+    this.canvas.width = Math.floor(width * dpr);
+    this.canvas.height = Math.floor(height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const style = getComputedStyle(this.canvas);
+    this.primaryColor = style.getPropertyValue('--color-primary').trim() || '#0f0';
+    this.bgColor = style.getPropertyValue('--color-bg').trim() || '#000';
   }
 
   init() {
-    const rect = this.canvas.getBoundingClientRect();
-
-    // Safety check: If canvas has no size yet, don't init (wait for next frame)
-    if (rect.width === 0 || rect.height === 0) return;
-
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    if (!this.width || !this.height) return;
 
     // 1. Init Foreground Terrain
     // Add extra points for buffer
-    const count = Math.ceil(this.canvas.width / this.segmentWidth) + 5;
-    this.terrainPoints = new Array(count).fill(this.canvas.height * 0.75);
+    const count = Math.ceil(this.width / this.segmentWidth) + 5;
+    this.terrainPoints = new Array(count).fill(this.height * 0.75);
 
     // Pre-seed roughness
     for (let i = 1; i < count; i++) {
@@ -55,13 +74,13 @@ export class TankDriveAnimation {
     }
 
     // 2. Init Background Mountains
-    const bgCount = Math.ceil(this.canvas.width / this.bgSegmentWidth) + 5;
+    const bgCount = Math.ceil(this.width / this.bgSegmentWidth) + 5;
     this.bgPoints = []; // Reset
-    let bgY = this.canvas.height * 0.6;
+    let bgY = this.height * 0.6;
     for (let i = 0; i < bgCount; i++) {
       bgY += (Math.random() * 40 - 20);
-      if (bgY < this.canvas.height * 0.3) bgY = this.canvas.height * 0.3;
-      if (bgY > this.canvas.height * 0.8) bgY = this.canvas.height * 0.8;
+      if (bgY < this.height * 0.3) bgY = this.height * 0.3;
+      if (bgY > this.height * 0.8) bgY = this.height * 0.8;
       this.bgPoints.push(bgY);
     }
 
@@ -70,8 +89,8 @@ export class TankDriveAnimation {
     const cloudCount = 6;
     for (let i = 0; i < cloudCount; i++) {
       this.clouds.push({
-        x: Math.random() * this.canvas.width,
-        y: Math.random() * (this.canvas.height * 0.4),
+        x: Math.random() * this.width,
+        y: Math.random() * (this.height * 0.4),
         size: 30 + Math.random() * 30,
         speedFactor: 0.2 + Math.random() * 0.3
       });
@@ -79,7 +98,7 @@ export class TankDriveAnimation {
   }
 
   generateNextPoint(prevHeight, roughnessOverride = null) {
-    const h = this.canvas.height;
+    const h = this.height || this.canvas.height;
     const baseHeight = h * 0.75;
 
     // Audio reactivity: Low freq = rougher terrain
@@ -104,8 +123,9 @@ export class TankDriveAnimation {
   }
 
   start() {
-    // Call init here to ensure canvas has dimensions
+    this.resize();
     this.init();
+    window.addEventListener('resize', this._resizeHandler);
 
     if (!this.frameId) {
       this.frameId = requestAnimationFrame(this.draw);
@@ -117,6 +137,7 @@ export class TankDriveAnimation {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    window.removeEventListener('resize', this._resizeHandler);
   }
 
   lerp(start, end, amt) {
@@ -125,20 +146,20 @@ export class TankDriveAnimation {
 
   draw = () => {
     const ctx = this.ctx;
-    const width = this.canvas.width;
-    const height = this.canvas.height;
+    const width = this.width;
+    const height = this.height;
 
     // If init failed (width=0), try again
     if (width === 0 || this.terrainPoints.length === 0) {
+      this.resize();
       this.init();
       this.frameId = requestAnimationFrame(this.draw);
       return;
     }
 
-    // Colors
-    const style = getComputedStyle(this.canvas);
-    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#0f0';
-    const bgColor = style.getPropertyValue('--color-bg').trim() || '#000';
+    // Colors (cached in resize())
+    const primaryColor = this.primaryColor;
+    const bgColor = this.bgColor;
 
     // Smooth Audio
     this.smoothedLow = this.lerp(this.smoothedLow, this.low, 0.1);

@@ -227,7 +227,7 @@ select option {
     background-color: #030305;
     /* Base deep black */
     overflow: hidden;
-    z-index: 2;
+    z-index: 0;
     opacity: 0.8;
     /* Optional: "Screen" mode makes the colors glow on top of white lines */
     mix-blend-mode: screen;

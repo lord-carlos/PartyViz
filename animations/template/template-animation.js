@@ -31,16 +31,11 @@ export class TemplateAnimation {
         // sizing and retina support
         this.width = 0; this.height = 0; this.dpr = 1;
         this.initialized = false; // defer drawing until layout is valid
+        this._positions = [0, 0, 0];
+        this._bands = [0, 0, 0];
 
         this.resize();
-        window.addEventListener('resize', () => {
-            this.resize();
-            // re-init only if layout becomes valid
-            if (!this.initialized && this.width > 40 && this.height > 40) {
-                this.initialized = true;
-                console.log(`[Template] Layout ready after resize -> ${this.width}x${this.height}`);
-            }
-        });
+        this._resizeHandler = () => this.resize();
 
         console.log(`[Template] Initialized: ${this.config.name || slug} (sensitivity=${this.sensitivity})`);
     }
@@ -114,19 +109,22 @@ export class TemplateAnimation {
         const centerX = this.width / 2;
         const centerY = this.height / 2;
         const spacing = Math.min(this.width / 6, 120);
-        const positions = [centerX - spacing, centerX, centerX + spacing];
+        this._positions[0] = centerX - spacing;
+        this._positions[1] = centerX;
+        this._positions[2] = centerX + spacing;
 
         // bands map: low, mid, high
-        const bands = [this.LOW, this.MID, this.HIGH];
-        const labels = ['LOW', 'MID', 'HIGH'];
+        this._bands[0] = this.LOW;
+        this._bands[1] = this.MID;
+        this._bands[2] = this.HIGH;
 
         for (let i = 0; i < 3; i++) {
-            const bandVal = bands[i];
+            const bandVal = this._bands[i];
             const size = this.BASE_SIZE + (bandVal / 100) * (this.SIZE_MULT * this.sensitivity);
             const alpha = 0.25 + (bandVal / 100) * 0.75; // alpha 0.25..1.0
             this.ctx.fillStyle = `rgba(51, 255, 0, ${alpha})`;
             this.ctx.beginPath();
-            this.ctx.arc(positions[i], centerY, size, 0, Math.PI * 2);
+            this.ctx.arc(this._positions[i], centerY, size, 0, Math.PI * 2);
             this.ctx.fill();
         }
 
@@ -146,12 +144,8 @@ export class TemplateAnimation {
             console.log(`[${this.config.name || 'Template'}] Starting loop.`);
             // Ensure layout is initialized (if it's not, drawFrame will wait)
             this.resize();
-            if (!this.initialized) {
-                // schedule a check loop; drawFrame will bail until layout ready
-                this.frameId = requestAnimationFrame(this.drawFrame);
-            } else {
-                this.frameId = requestAnimationFrame(this.drawFrame);
-            }
+            window.addEventListener('resize', this._resizeHandler);
+            this.frameId = requestAnimationFrame(this.drawFrame);
         }
     }
     
@@ -164,5 +158,6 @@ export class TemplateAnimation {
             cancelAnimationFrame(this.frameId);
             this.frameId = null;
         }
+        window.removeEventListener('resize', this._resizeHandler);
     }
 }

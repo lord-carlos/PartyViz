@@ -1,143 +1,177 @@
 // audio-manager.js
+import { estimateBpmFromEnvelope, resampleEnvelope } from './bpm-estimator.js';
+
+const DEFAULT_BAND_DEFS = [
+    { name: 'low', from: 20, to: 250 },
+    { name: 'mid', from: 250, to: 4000 },
+    { name: 'high', from: 4000, to: 20000 },
+];
+
+const TEST_BPM_MIN = 40;
+const TEST_BPM_MAX = 200;
+const DEFAULT_MIN_BPM = 60;
+const DEFAULT_MAX_BPM = 200;
+
 export class AudioManager {
     constructor() {
         this.audioCtx = null;
         this.analyser = null;
         this.source = null;
-        this.stream = null; // Keep track of stream to stop it later
-        this.dataArray = null; // Uint8 for legacy
+        this.stream = null;
 
-        // Float spectrum and helper arrays
-        this.floatSpectrum = null; // Float32 dB values
+        this.dataArray = null; // legacy byte spectrum
+        this.floatSpectrum = null; // dB values from AnalyserNode
         this.magArray = null; // linear magnitudes
-        this.prevMag = null; // previous magnitudes for spectral flux
-        this.spectrumNorm = null; // 0-100 normalized
+        this.prevDb = null; // previous dB values for spectral flux
+        this.spectrumNorm = null; // 0..100 normalized spectrum
 
         this.sampleRate = 44100;
         this.fftSize = 2048;
         this.binCount = Math.floor(this.fftSize / 2);
 
-        // allocate fallback arrays so test-mode works before mic is enabled
+        // Allocate fallback buffers so test mode works before the mic is enabled.
         this.dataArray = new Uint8Array(this.binCount);
         this.floatSpectrum = new Float32Array(this.binCount);
         this.magArray = new Float32Array(this.binCount);
-        this.prevMag = new Float32Array(this.binCount);
+        this.prevDb = new Float32Array(this.binCount);
         this.spectrumNorm = new Float32Array(this.binCount);
+        this.prevDb.fill(-100);
 
         this.isLive = false;
         this.isTestMode = true;
+        this.running = false;
         this.rafId = null;
 
-        // Default frequency bands (Hz) — can be overridden with setBands()
-        this.bandDefs = [
-            { name: 'low', from: 20, to: 250 },
-            { name: 'mid', from: 250, to: 4000 },
-            { name: 'high', from: 4000, to: 20000 },
-        ];
-        this.bands = {}; // computed bin ranges populated by _computeBandBins()
+        // Frequency bands (Hz) — override with setBands().
+        this.bandDefs = DEFAULT_BAND_DEFS.map((band) => ({ ...band }));
+        this.bands = {};
+        this._computeBandBins();
 
-        // callback for rich updates
-        this.onUpdateCallback = null;
+        // Rich updates. onUpdate() keeps every subscriber and returns an unsubscribe fn.
+        this._listeners = new Set();
+        this.onUpdateCallback = null; // legacy single-callback slot
 
-        // spectral feature state
+        // Spectral feature state.
         this.fluxHistory = []; // {ts, flux}
-        this.maxFluxHistorySec = 60;
+        this.maxFluxHistorySec = 30;
 
-        // BPM settings & state
+        // BPM settings & state.
         this.bpmWindowSec = 20;
         this.bpmUpdateIntervalSec = 3;
-        this.bpmMinConfidence = 0.4;
-        this.bpmSampleRateHz = 20; // decimated rate for BPM estimator
-
+        this.bpmMinConfidence = 0.45;
+        this.bpmSampleRateHz = 50;
         this.bpmSamples = []; // {value, confidence, ts}
         this.lastBpm = null;
         this.lastBpmTs = 0;
         this._lastBpmEstimateRun = 0;
+        this._bpmRequestId = 0;
+        this._bpmWorker = null;
+        this.lastBpmCorrelation = 0;
 
-        // keep old index-based ranges for backwards compatibility
+        // Test-mode generator. A deterministic musical pattern is much more useful
+        // than random noise: it exercises transients and can be BPM-detected.
+        this.testBpm = 120;
+        this._testNoise = new Float32Array(this.binCount);
+        for (let i = 0; i < this._testNoise.length; i++) {
+            this._testNoise[i] = Math.random();
+        }
+        this._testLow = 0;
+        this._testMid = 0;
+        this._testHigh = 0;
+
+        // Kept for backwards compatibility with older callers.
         this.bassRange = [0, 5];
         this.midRange = [15, 90];
         this.highRange = [120, 500];
     }
 
     setTestMode(enabled) {
-        this.isTestMode = enabled;
-        // Suspend context when testing to save CPU, resume when live
+        this.isTestMode = !!enabled;
+        this._resetAudioState();
         if (this.audioCtx) {
             if (enabled && this.audioCtx.state === 'running') this.audioCtx.suspend();
             else if (!enabled && this.audioCtx.state === 'suspended') this.audioCtx.resume();
         }
     }
 
+    setTestBpm(bpm) {
+        const value = Number(bpm);
+        if (isFinite(value) && value >= TEST_BPM_MIN && value <= TEST_BPM_MAX) {
+            this.testBpm = value;
+        }
+        return this.testBpm;
+    }
+
     /**
      * Returns a list of available audio input devices.
-     * Note: Labels are empty strings until permission is granted.
+     * Labels are empty until microphone permission has been granted.
      */
     async getAudioDevices() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
         const devices = await navigator.mediaDevices.enumerateDevices();
-        return devices.filter(d => d.kind === 'audioinput');
+        return devices.filter((device) => device.kind === 'audioinput');
     }
 
     /**
-     * Starts audio input.
-     * @param {string|null} deviceId - Optional specific device ID
+     * Starts or switches audio input.
+     * @param {string|null} deviceId
      */
     async enableLiveInput(deviceId = null) {
         try {
-            // 1. Setup Audio Context if missing
             if (!this.audioCtx) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                this.audioCtx = new AudioContext();
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) throw new Error('Web Audio API is not available');
+                this.audioCtx = new AudioContextClass();
                 this.analyser = this.audioCtx.createAnalyser();
                 this.analyser.fftSize = this.fftSize;
                 this.fftSize = this.analyser.fftSize;
-                this.analyser.smoothingTimeConstant = 0.8;
+                this.analyser.smoothingTimeConstant = 0.7;
 
                 const bufferLength = this.analyser.frequencyBinCount;
                 this.binCount = bufferLength;
-                this.dataArray = new Uint8Array(bufferLength); // legacy byte array
+                this.dataArray = new Uint8Array(bufferLength);
                 this.floatSpectrum = new Float32Array(bufferLength);
                 this.magArray = new Float32Array(bufferLength);
                 this.spectrumNorm = new Float32Array(bufferLength);
-                this.prevMag = new Float32Array(bufferLength);
+                this.prevDb = new Float32Array(bufferLength);
+                this.prevDb.fill(-100);
+                this._testNoise = new Float32Array(bufferLength);
+                for (let i = 0; i < this._testNoise.length; i++) {
+                    this._testNoise[i] = Math.random();
+                }
                 this.sampleRate = this.audioCtx.sampleRate || 44100;
 
-                // populate band bin ranges
                 this._computeBandBins();
             }
 
-            // 2. Stop existing stream if switching devices
             if (this.stream) {
-                this.stream.getTracks().forEach(track => track.stop());
+                this.stream.getTracks().forEach((track) => track.stop());
             }
             if (this.source) {
                 this.source.disconnect();
+                this.source = null;
             }
 
-            // 3. Constraints
             const constraints = {
-                audio: deviceId ? { deviceId: { exact: deviceId } } : true
+                audio: deviceId ? { deviceId: { exact: deviceId } } : true,
             };
 
-            // 4. Get Stream
             this.stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-            // 5. Connect Source -> Analyser
             this.source = this.audioCtx.createMediaStreamSource(this.stream);
             this.source.connect(this.analyser);
 
             this.isLive = true;
             this.isTestMode = false;
+            this._resetAudioState();
 
-            if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
+            if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
 
             console.log(`[AudioManager] Connected to device: ${deviceId || 'Default'}`);
             return true;
-
         } catch (err) {
             console.error('[AudioManager] Access denied or error:', err);
-            alert('Could not access microphone. Check permissions.');
+            this.isLive = false;
             return false;
         }
     }
@@ -154,9 +188,16 @@ export class AudioManager {
         return count === 0 ? 0 : values / count;
     }
 
-    // --- New API helpers ---
+    // --- Rich update API ---
+
+    /**
+     * Subscribe to per-frame audio data. Returns an unsubscribe function.
+     * @param {(payload: object) => void} callback
+     */
     onUpdate(callback) {
-        this.onUpdateCallback = callback;
+        if (typeof callback !== 'function') return () => {};
+        this._listeners.add(callback);
+        return () => this._listeners.delete(callback);
     }
 
     getSpectrum({ format = 'db' } = {}) {
@@ -169,7 +210,8 @@ export class AudioManager {
     }
 
     setBands(bandDefs) {
-        this.bandDefs = bandDefs;
+        if (!Array.isArray(bandDefs) || !bandDefs.length) return;
+        this.bandDefs = bandDefs.map((band) => ({ ...band }));
         this._computeBandBins();
     }
 
@@ -189,264 +231,327 @@ export class AudioManager {
         return Math.max(0, Math.min(this.binCount - 1, bin));
     }
 
+    _resetAudioState() {
+        this.fluxHistory = [];
+        this.bpmSamples = [];
+        this.lastBpm = null;
+        this.lastBpmTs = 0;
+        this.lastBpmCorrelation = 0;
+        this._lastBpmEstimateRun = 0;
+        this._bpmRequestId++;
+        if (this.prevDb) this.prevDb.fill(-100);
+    }
+
+    _fillSilence() {
+        this.floatSpectrum.fill(-100);
+    }
+
+    _readRealSpectrum() {
+        if (typeof this.analyser.getFloatFrequencyData === 'function') {
+            this.analyser.getFloatFrequencyData(this.floatSpectrum);
+            return;
+        }
+
+        // Very old browsers: approximate dB from byte data.
+        this.analyser.getByteFrequencyData(this.dataArray);
+        for (let i = 0; i < this.binCount; i++) {
+            this.floatSpectrum[i] = -100 + (this.dataArray[i] / 255) * 100;
+        }
+    }
+
+    /**
+     * Simulates a simple four-on-the-floor pattern at this.testBpm.
+     * Returns the intended 0..100 band values so they can be exposed exactly.
+     */
+    _generateTestSpectrum(nowSec) {
+        const bpm = this.testBpm;
+        const beats = (nowSec * bpm) / 60;
+        const beatIndex = Math.floor(beats);
+        const beatPhase = beats - beatIndex;
+        const barBeat = ((beatIndex % 8) + 8) % 8;
+
+        const kick = Math.exp(-beatPhase * 8);
+        const snare = barBeat % 4 === 1 || barBeat % 4 === 3 ? Math.exp(-beatPhase * 12) : 0;
+        const eighthPhase = (beats * 2) % 1;
+        const hat = Math.exp(-eighthPhase * 24);
+
+        const low = 28 + 62 * kick + 6 * Math.sin(nowSec * 0.8);
+        const mid = 34 + 22 * (0.5 + 0.5 * Math.sin(nowSec * 0.9 + 1.3)) + 14 * snare;
+        const high = 16 + 52 * hat + 20 * snare + 8 * (0.5 + 0.5 * Math.sin(nowSec * 2.3));
+
+        this._testLow = Math.max(0, Math.min(100, low));
+        this._testMid = Math.max(0, Math.min(100, mid));
+        this._testHigh = Math.max(0, Math.min(100, high));
+
+        // Build a plausible spectrum so the debug visualizer has something to draw.
+        // Static noise floor + a dB boost per band keeps flux tied to real onsets.
+        const spec = this.floatSpectrum;
+        for (let i = 0; i < this.binCount; i++) {
+            spec[i] = -98 + this._testNoise[i] * 6;
+        }
+        this._boostBand('low', this._testLow);
+        this._boostBand('mid', this._testMid);
+        this._boostBand('high', this._testHigh);
+
+        return { low: this._testLow, mid: this._testMid, high: this._testHigh };
+    }
+
+    _boostBand(name, value) {
+        const band = this.bands[name];
+        if (!band) return;
+        for (let i = band.fromBin; i <= band.toBin; i++) {
+            this.floatSpectrum[i] = Math.min(0, this.floatSpectrum[i] + value);
+        }
+    }
+
     _computeFeatures() {
-        // convert dB to linear magnitudes
         const len = this.binCount || (this.floatSpectrum ? this.floatSpectrum.length : 0);
-        if (!len) return null;
+        if (!len || !this.floatSpectrum) return null;
 
         let rms = 0;
         let magSum = 0;
         let magWeightedFreq = 0;
+        let flux = 0;
         const sr = this.sampleRate || 44100;
 
         for (let i = 0; i < len; i++) {
-            const db = this.floatSpectrum[i];
-            // clamp -100..0
-            const dbClamped = isFinite(db) ? db : -100;
-            const mag = Math.pow(10, dbClamped / 20); // linear magnitude
+            const raw = this.floatSpectrum[i];
+            const db = isFinite(raw) ? raw : -100;
+            this.floatSpectrum[i] = db;
+
+            // Positive dB difference is a cheap, robust onset strength.
+            const diff = db - this.prevDb[i];
+            if (diff > 0) flux += diff;
+            this.prevDb[i] = db;
+
+            const mag = Math.pow(10, db / 20);
             this.magArray[i] = mag;
             rms += mag * mag;
 
             const freq = (i * sr) / this.fftSize;
             magWeightedFreq += mag * freq;
             magSum += mag;
+
+            this.spectrumNorm[i] = Math.max(0, Math.min(100, (db + 100)));
         }
 
         rms = Math.sqrt(rms / len);
         const centroidHz = magSum > 0 ? magWeightedFreq / magSum : 0;
-
-        // spectral flux (positive difference between magnitudes)
-        let flux = 0;
-        if (this.prevMag) {
-            for (let i = 0; i < len; i++) {
-                const diff = this.magArray[i] - (this.prevMag[i] || 0);
-                if (diff > 0) flux += diff;
-            }
-            // normalize
-            flux = flux / len;
-        }
-
-        // copy magArray into prevMag
-        this.prevMag.set(this.magArray);
-
-        // normalized spectrum 0..100 based on dB range (-100..0)
-        for (let i = 0; i < len; i++) {
-            const db = this.floatSpectrum[i];
-            const norm = Math.max(0, Math.min(1, (db + 100) / 100));
-            this.spectrumNorm[i] = norm * 100;
-        }
+        flux /= len;
 
         const ts = Date.now();
         this.fluxHistory.push({ ts, flux });
-        // purge old
         const cutoff = ts - this.maxFluxHistorySec * 1000;
-        while (this.fluxHistory.length && this.fluxHistory[0].ts < cutoff) this.fluxHistory.shift();
+        while (this.fluxHistory.length && this.fluxHistory[0].ts < cutoff) {
+            this.fluxHistory.shift();
+        }
 
         return { rms, centroidHz, spectralFlux: flux };
+    }
+
+    _computeBands() {
+        const bandsOut = {};
+        for (const name of Object.keys(this.bands)) {
+            const band = this.bands[name];
+            let sumDb = 0;
+            let count = 0;
+            for (let i = band.fromBin; i <= band.toBin; i++) {
+                const db = this.floatSpectrum[i];
+                if (db !== undefined && isFinite(db)) {
+                    sumDb += db;
+                    count++;
+                }
+            }
+            const avgDb = count ? sumDb / count : -100;
+            bandsOut[name] = Math.max(0, Math.min(100, Math.round(avgDb + 100)));
+        }
+        return bandsOut;
     }
 
     addBpmSample(value, confidence) {
         const ts = Date.now();
         if (!isFinite(value) || value <= 0 || confidence < this.bpmMinConfidence) return;
+
+        // Fold obvious octave errors (60 <-> 120 <-> 240).
+        if (this.lastBpm) {
+            while (value > this.lastBpm * 1.7) value /= 2;
+            while (value < this.lastBpm / 1.7) value *= 2;
+        }
+
         this.bpmSamples.push({ value, confidence, ts });
         const cutoff = ts - this.bpmWindowSec * 1000;
-        while (this.bpmSamples.length && this.bpmSamples[0].ts < cutoff) this.bpmSamples.shift();
+        while (this.bpmSamples.length && this.bpmSamples[0].ts < cutoff) {
+            this.bpmSamples.shift();
+        }
+
         this.lastBpm = this.getRollingBpm();
         this.lastBpmTs = ts;
     }
 
     getRollingBpm() {
         if (!this.bpmSamples.length) return null;
-        let weighted = 0, wsum = 0;
-        for (const s of this.bpmSamples) {
-            // weight by confidence (could add recency later)
-            weighted += s.value * s.confidence;
-            wsum += s.confidence;
+        const now = Date.now();
+        let weighted = 0;
+        let weightSum = 0;
+        for (const sample of this.bpmSamples) {
+            const ageSec = Math.max(0, (now - sample.ts) / 1000);
+            const recency = Math.max(0.25, 1 - ageSec / this.bpmWindowSec);
+            const weight = sample.confidence * recency;
+            weighted += sample.value * weight;
+            weightSum += weight;
         }
-        return wsum ? weighted / wsum : null;
+        return weightSum ? weighted / weightSum : null;
     }
 
-    // Estimate BPM periodically (offload to worker when available)
+    getBpmInfo() {
+        const rolling = this.getRollingBpm();
+        const last = this.bpmSamples.length ? this.bpmSamples[this.bpmSamples.length - 1] : null;
+        const recent = this.bpmSamples.slice(-5).map((sample) => sample.value);
+        let stable = false;
+        if (recent.length >= 3) {
+            const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+            const spread = Math.sqrt(recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length);
+            stable = spread <= 3;
+        }
+
+        return {
+            value: rolling ? Math.round(rolling * 10) / 10 : null,
+            rolling: rolling ? Math.round(rolling * 10) / 10 : null,
+            confidence: last ? last.confidence : 0,
+            correlation: this.lastBpmCorrelation,
+            ageMs: this.lastBpmTs ? Date.now() - this.lastBpmTs : Infinity,
+            samples: this.bpmSamples.length,
+            stable,
+        };
+    }
+
+    _buildBpmEnvelope() {
+        if (this.fluxHistory.length < 2) return null;
+        const cutoff = Date.now() - this.bpmWindowSec * 1000;
+        let first = 0;
+        while (first < this.fluxHistory.length && this.fluxHistory[first].ts < cutoff) first++;
+        const samples = this.fluxHistory
+            .slice(first)
+            .map((entry) => ({ ts: entry.ts, value: entry.flux }));
+        const envelope = resampleEnvelope(samples, this.bpmSampleRateHz);
+        return envelope.length ? envelope : null;
+    }
+
+    _handleBpmResult(msg) {
+        if (!msg || msg.type !== 'bpm') return;
+        if (msg.requestId && msg.requestId !== this._bpmRequestId) return;
+        this.lastBpmCorrelation = msg.correlation || 0;
+        if (msg.value && msg.confidence >= this.bpmMinConfidence) {
+            this.addBpmSample(msg.value, msg.confidence);
+        }
+    }
+
+    _ensureBpmWorker() {
+        if (this._bpmWorker) return this._bpmWorker;
+        if (typeof Worker === 'undefined') return null;
+        try {
+            this._bpmWorker = new Worker(new URL('./bpm-worker.js', import.meta.url), { type: 'module' });
+            this._bpmWorker.onmessage = (event) => this._handleBpmResult(event.data);
+            this._bpmWorker.onerror = (event) => {
+                console.warn('[AudioManager] BPM worker failed, using main-thread fallback', event.message || event);
+                this._bpmWorker.terminate();
+                this._bpmWorker = null;
+            };
+            return this._bpmWorker;
+        } catch (err) {
+            console.warn('[AudioManager] Could not create BPM worker, using main-thread fallback', err);
+            this._bpmWorker = null;
+            return null;
+        }
+    }
+
     _estimateBpmIfNeeded() {
+        if (!this.isTestMode && !this.isLive) return;
+
         const now = Date.now();
         if (now - this._lastBpmEstimateRun < this.bpmUpdateIntervalSec * 1000) return;
+
+        const envelope = this._buildBpmEnvelope();
+        if (!envelope || envelope.length < this.bpmSampleRateHz * 4) return;
+
         this._lastBpmEstimateRun = now;
+        this._bpmRequestId++;
+        const requestId = this._bpmRequestId;
 
-        // Copy flux history and send to worker
-        const samples = this.fluxHistory.slice();
-
-        if (this._bpmWorker) {
+        const worker = this._ensureBpmWorker();
+        if (worker) {
             try {
-                this._bpmWorker.postMessage({ type: 'estimate', samples, targetRate: this.bpmSampleRateHz, minBpm: 40, maxBpm: 200 });
+                worker.postMessage({
+                    type: 'estimate',
+                    requestId,
+                    envelope,
+                    rate: this.bpmSampleRateHz,
+                    minBpm: DEFAULT_MIN_BPM,
+                    maxBpm: DEFAULT_MAX_BPM,
+                });
                 return;
-            } catch (e) {
-                console.warn('[AudioManager] bpm worker postMessage failed, falling back', e);
+            } catch (err) {
+                console.warn('[AudioManager] BPM worker postMessage failed', err);
             }
         }
 
-        // Create worker lazily if available
-        if (typeof Worker !== 'undefined') {
-            try {
-                this._bpmWorker = new Worker('./bpm-worker.js', { type: 'module' });
-                this._bpmWorker.onmessage = (ev) => {
-                    const msg = ev.data;
-                    if (!msg || msg.type !== 'bpm') return;
-                    if (msg.value && msg.confidence >= this.bpmMinConfidence) {
-                        this.addBpmSample(msg.value, msg.confidence);
-                    }
-                };
-                // send the samples for estimation
-                this._bpmWorker.postMessage({ type: 'estimate', samples, targetRate: this.bpmSampleRateHz, minBpm: 40, maxBpm: 200 });
-                return;
-            } catch (e) {
-                console.warn('[AudioManager] Could not create bpm worker, using local estimator', e);
-            }
-        }
-
-        // Fallback: local synchronous estimator
-        const estimate = this._estimateBpmFromFlux();
-        if (estimate && estimate.confidence >= this.bpmMinConfidence) {
-            this.addBpmSample(estimate.value, estimate.confidence);
+        const result = estimateBpmFromEnvelope(envelope, this.bpmSampleRateHz, {
+            minBpm: DEFAULT_MIN_BPM,
+            maxBpm: DEFAULT_MAX_BPM,
+        });
+        if (result) {
+            this.lastBpmCorrelation = result.correlation;
+            this.addBpmSample(result.value, result.confidence);
         }
     }
 
-    _estimateBpmFromFlux() {
-        // collect last bpmWindowSec of flux at decimated rate
-        const now = Date.now();
-        const cutoff = now - this.bpmWindowSec * 1000;
-        const samples = this.fluxHistory.filter(f => f.ts >= cutoff);
-        if (samples.length < 4) return null;
-
-        // decimate to target rate
-        const targetRate = this.bpmSampleRateHz;
-        const dt = 1000 / targetRate;
-        const start = samples[0].ts;
-        const dec = [];
-        for (let t = start; t <= now; t += dt) {
-            // find sample nearest to t
-            let closest = null;
-            // simple linear scan (samples not huge)
-            for (let i = 0; i < samples.length; i++) {
-                if (!closest || Math.abs(samples[i].ts - t) < Math.abs(closest.ts - t)) closest = samples[i];
+    _emitPayload(payload) {
+        for (const callback of this._listeners) {
+            try {
+                callback(payload);
+            } catch (err) {
+                console.error('[AudioManager] onUpdate callback error', err);
             }
-            dec.push(closest ? closest.flux : 0);
         }
-
-        if (dec.length < 4) return null;
-
-        // remove mean
-        const mean = dec.reduce((a, b) => a + b, 0) / dec.length;
-        for (let i = 0; i < dec.length; i++) dec[i] -= mean;
-
-        // autocorrelation for lags that map to BPM 40..200
-        const minBpm = 40, maxBpm = 200;
-        const minLag = Math.floor((60 / maxBpm) * targetRate);
-        const maxLag = Math.ceil((60 / minBpm) * targetRate);
-        let bestLag = -1, bestVal = -Infinity;
-        for (let lag = minLag; lag <= maxLag && lag < dec.length; lag++) {
-            let val = 0;
-            for (let i = 0; i < dec.length - lag; i++) val += dec[i] * dec[i + lag];
-            if (val > bestVal) { bestVal = val; bestLag = lag; }
+        if (this.onUpdateCallback && !this._listeners.has(this.onUpdateCallback)) {
+            try {
+                this.onUpdateCallback(payload);
+            } catch (err) {
+                console.error('[AudioManager] onUpdateCallback error', err);
+            }
         }
-        if (bestLag <= 0) return null;
-
-        const bpm = 60 / (bestLag / targetRate);
-        // confidence: normalized peak relative to average energy
-        const energy = dec.reduce((a, b) => a + Math.abs(b), 0) / dec.length;
-        const confidence = energy > 0 ? Math.min(1, bestVal / (energy * energy * (dec.length - bestLag))) : 0;
-        return { value: Math.round(bpm * 10) / 10, confidence };
     }
 
     startLoop() {
+        if (this.running) return;
+        this.running = true;
+
         const loop = () => {
+            if (!this.running) return;
             this.rafId = requestAnimationFrame(loop);
 
-            // Acquire spectrum
-            if (this.isTestMode || !this.isLive) {
-                // Synthetic, stronger test-mode spectrum so bands are meaningful
-                // Random strengths for bands 0..100
-                const rLow = Math.random() * 100;
-                const rMid = Math.random() * 100;
-                const rHigh = Math.random() * 100;
+            const nowSec = performance.now() / 1000;
+            let testBands = null;
 
-                // baseline dB noise
-                for (let i = 0; i < this.binCount; i++) {
-                    this.floatSpectrum[i] = -90 + (Math.random() * 20 - 10); // around -90..-70 dB
-                }
-
-                // apply band boosts (map 0..100 -> 0..50 dB boost)
-                const applyBoost = (name, val) => {
-                    const band = this.bands[name];
-                    if (!band) return;
-                    const boost = (val / 100) * 50; // up to +50 dB (clamped later)
-                    for (let i = band.fromBin; i <= band.toBin; i++) {
-                        this.floatSpectrum[i] = Math.min(0, this.floatSpectrum[i] + boost);
-                    }
-                };
-                applyBoost('low', rLow);
-                applyBoost('mid', rMid);
-                applyBoost('high', rHigh);
-
-                // keep simple numeric fallback values for legacy API
-                var _testLow = Math.floor(rLow);
-                var _testMid = Math.floor(rMid);
-                var _testHigh = Math.floor(rHigh);
-
+            if (this.isTestMode) {
+                testBands = this._generateTestSpectrum(nowSec);
+            } else if (this.isLive && this.analyser) {
+                this._readRealSpectrum();
             } else {
-                if (typeof this.analyser.getFloatFrequencyData === 'function') {
-                    this.analyser.getFloatFrequencyData(this.floatSpectrum);
-                } else {
-                    // Fallback to byte data and convert to an approximate dB
-                    this.analyser.getByteFrequencyData(this.dataArray);
-                    for (let i = 0; i < this.binCount; i++) {
-                        // byte 0..255 -> dB roughly -100..0
-                        this.floatSpectrum[i] = (this.dataArray[i] / 255) * -100 + (this.dataArray[i] ? 0 : -100);
-                    }
-                }
+                this._fillSilence();
             }
 
-            // Compute features (fills magArray and spectrumNorm, pushes fluxHistory)
             const features = this._computeFeatures() || { rms: 0, centroidHz: 0, spectralFlux: 0 };
+            const bandsOut = this._computeBands();
 
-            // Compute band averages (0..100) using floatSpectrum dB averages (more perceptually stable)
-            const bandsOut = {};
-            for (const name of Object.keys(this.bands)) {
-                const b = this.bands[name];
-                let sumDb = 0, count = 0;
-                for (let i = b.fromBin; i <= b.toBin; i++) {
-                    const db = this.floatSpectrum[i];
-                    if (db !== undefined && isFinite(db)) { sumDb += db; count++; }
+            // Exact values in test mode, so animations receive the intended pattern.
+            if (testBands) {
+                for (const name of Object.keys(bandsOut)) {
+                    if (testBands[name] !== undefined) bandsOut[name] = Math.round(testBands[name]);
                 }
-                const avgDb = count ? (sumDb / count) : -100; // default to very quiet
-                // map dB (-100..0) -> 0..100
-                const val = Math.min(100, Math.max(0, Math.round(avgDb + 100)));
-                bandsOut[name] = val;
             }
 
-            // If we're in test mode, prefer the generated random band values so legacy animations are lively
-            if (this.isTestMode || !this.isLive) {
-                if (typeof _testLow !== 'undefined') bandsOut.low = Math.floor(_testLow);
-                if (typeof _testMid !== 'undefined') bandsOut.mid = Math.floor(_testMid);
-                if (typeof _testHigh !== 'undefined') bandsOut.high = Math.floor(_testHigh);
-            }
-
-            // Backwards compatibility: compute low/mid/high from bandDefs if present
-            const low = bandsOut.low || 0;
-            const mid = bandsOut.mid || 0;
-            const high = bandsOut.high || 0;
-
-            // Estimate BPM periodically
             this._estimateBpmIfNeeded();
-
-            const rolling = this.getRollingBpm();
-            const lastSample = this.bpmSamples.length ? this.bpmSamples[this.bpmSamples.length - 1] : null;
-            const bpmOut = {
-                value: lastSample ? lastSample.value : null,
-                rolling: rolling,
-                confidence: lastSample ? lastSample.confidence : 0,
-                ageMs: this.lastBpmTs ? (Date.now() - this.lastBpmTs) : Infinity,
-                stable: !!rolling
-            };
 
             const payload = {
                 timestamp: Date.now(),
@@ -456,80 +561,95 @@ export class AudioManager {
                 spectrumNorm: this.spectrumNorm,
                 bands: bandsOut,
                 features,
-                bpm: bpmOut
+                bpm: this.getBpmInfo(),
             };
 
-            // Callback for consumers wanting a richer payload
-            if (this.onUpdateCallback && typeof this.onUpdateCallback === 'function') {
-                try { this.onUpdateCallback(payload); } catch (e) { console.error('[AudioManager] onUpdate callback error', e); }
-            }
+            this._emitPayload(payload);
 
-            // Preserve legacy simple API
-            if (window.currentAnimation && typeof window.currentAnimation.updateFrequencies === 'function') {
-                window.currentAnimation.updateFrequencies(Math.floor(low), Math.floor(mid), Math.floor(high));
+            const low = bandsOut.low || 0;
+            const mid = bandsOut.mid || 0;
+            const high = bandsOut.high || 0;
+
+            if (typeof window !== 'undefined' && window.currentAnimation && typeof window.currentAnimation.updateFrequencies === 'function') {
+                window.currentAnimation.updateFrequencies(low, mid, high);
             }
         };
-        loop();
+
+        this.rafId = requestAnimationFrame(loop);
+    }
+
+    stopLoop() {
+        this.running = false;
+        if (this.rafId) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
     }
 
     dispose() {
-        // Stop RAF loop
-        try {
-            if (this.rafId) {
-                cancelAnimationFrame(this.rafId);
-                this.rafId = null;
-            }
-        } catch (e) { /* ignore */ }
+        this.stopLoop();
 
-        // Terminate BPM worker
         try {
             if (this._bpmWorker) {
                 this._bpmWorker.terminate();
                 this._bpmWorker = null;
             }
-        } catch (e) { console.warn('[AudioManager] Error terminating bpm worker', e); }
+        } catch (err) {
+            console.warn('[AudioManager] Error terminating BPM worker', err);
+        }
 
-        // Stop live media stream
         try {
             if (this.stream && this.stream.getTracks) {
-                this.stream.getTracks().forEach(track => track.stop());
+                this.stream.getTracks().forEach((track) => track.stop());
                 this.stream = null;
             }
-        } catch (e) { console.warn('[AudioManager] Error stopping stream', e); }
+        } catch (err) {
+            console.warn('[AudioManager] Error stopping stream', err);
+        }
 
-        // Disconnect audio nodes
         try {
             if (this.source && typeof this.source.disconnect === 'function') {
-                try { this.source.disconnect(); } catch (e) { /* ignore */ }
+                try {
+                    this.source.disconnect();
+                } catch (err) {
+                    /* ignore */
+                }
                 this.source = null;
             }
             if (this.analyser && typeof this.analyser.disconnect === 'function') {
-                try { this.analyser.disconnect(); } catch (e) { /* ignore */ }
+                try {
+                    this.analyser.disconnect();
+                } catch (err) {
+                    /* ignore */
+                }
                 this.analyser = null;
             }
-        } catch (e) { console.warn('[AudioManager] Error disconnecting nodes', e); }
+        } catch (err) {
+            console.warn('[AudioManager] Error disconnecting nodes', err);
+        }
 
-        // Close audio context (optional) — attempt it
         try {
             if (this.audioCtx && typeof this.audioCtx.close === 'function') {
                 this.audioCtx.close();
                 this.audioCtx = null;
             }
-        } catch (e) { console.warn('[AudioManager] Error closing audio context', e); }
+        } catch (err) {
+            console.warn('[AudioManager] Error closing audio context', err);
+        }
 
-        // Clear buffers and callbacks
+        this._listeners.clear();
         this.onUpdateCallback = null;
         this.floatSpectrum = null;
         this.spectrumNorm = null;
         this.magArray = null;
-        this.prevMag = null;
+        this.prevDb = null;
         this.dataArray = null;
 
-        // Clear histories
         this.fluxHistory = [];
         this.bpmSamples = [];
         this.lastBpm = null;
         this.lastBpmTs = 0;
+        this.lastBpmCorrelation = 0;
 
         this.isLive = false;
         this.isTestMode = true;

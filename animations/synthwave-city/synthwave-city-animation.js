@@ -1,4 +1,4 @@
-import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+import * as THREE from 'three';
 
 export class SynthwaveCityAnimation {
   constructor(canvas, config) {
@@ -96,6 +96,7 @@ export class SynthwaveCityAnimation {
   init() {
     console.log('[synthwave-city] Initializing 3D scene...');
 
+    if (this.scene) return; // start() can be called again after a pause
     if (!this.webglSupported) {
       this.showWebGLError();
       return;
@@ -106,21 +107,21 @@ export class SynthwaveCityAnimation {
       this.scene.fog = new THREE.Fog(this.colors.fog, 30, 150);
 
       const aspect = this.canvas.width / this.canvas.height;
-      this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+      this.camera = new THREE.PerspectiveCamera(75, aspect || 1, 0.1, 1000);
       this.camera.position.set(0, 20, 60); // Adjusted camera to look down the street
       this.camera.lookAt(0, 0, 0);
 
       this.renderer = new THREE.WebGLRenderer({
         canvas: this.canvas,
         antialias: true,
-        alpha: true,
-        preserveDrawingBuffer: true
+        alpha: true
       });
 
-      this.renderer.setSize(this.canvas.width, this.canvas.height);
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this.renderer.setSize(this.canvas.width, this.canvas.height, false);
+      // Soft shadow maps across ~200 buildings are a large per-frame cost for
+      // very little visible gain in this fog-heavy scene.
+      this.renderer.shadowMap.enabled = false;
       this.renderer.setClearColor(this.colors.sky, 1);
 
       this.createMaterials();
@@ -139,14 +140,19 @@ export class SynthwaveCityAnimation {
   }
 
   showWebGLError() {
+    const viewContainer = this.canvas.closest('.animation-view');
+    // start() is idempotent; never stack a second overlay on a repeated call.
+    if (!viewContainer || viewContainer.querySelector('.webgl-error-overlay')) return;
     const errorDiv = document.createElement('div');
+    errorDiv.className = 'webgl-error-overlay';
     errorDiv.style.cssText = `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #ff0066; background: rgba(0,0,51,0.9); padding: 20px; border: 2px solid #00ffff; border-radius: 10px; z-index: 1000;`;
     errorDiv.innerHTML = `<div>WebGL not supported</div>`;
-    const viewContainer = this.canvas.closest('.animation-view');
-    if (viewContainer) viewContainer.appendChild(errorDiv);
+    viewContainer.appendChild(errorDiv);
   }
 
   createMaterials() {
+    this.windowGeometry = new THREE.PlaneGeometry(0.4, 0.6);
+
     this.buildingMaterials.tower = new THREE.MeshPhongMaterial({
       color: this.colors.buildings.tower,
       emissive: this.colors.buildings.tower,
@@ -293,6 +299,12 @@ export class SynthwaveCityAnimation {
  addWindows(building, height) {
     const buildingType = building.userData.type;
     const windowRows = Math.floor(height / 3);
+
+    // One material per building instead of one per window: far fewer material
+    // updates each frame and less GPU state churn.
+    const windowMaterial = this.windowMaterial.clone();
+    building.userData.windowMaterial = windowMaterial;
+    building.userData.windowsLit = false;
     
     // Determine dimensions based on type
     const width = buildingType === 'block' ? 3 : 1.5;
@@ -308,8 +320,7 @@ export class SynthwaveCityAnimation {
           // Randomly skip some windows for variety
           if (Math.random() > 0.6) continue;
 
-          const windowGeometry = new THREE.PlaneGeometry(0.4, 0.6);
-          const windowMesh = new THREE.Mesh(windowGeometry, this.windowMaterial.clone());
+          const windowMesh = new THREE.Mesh(this.windowGeometry, windowMaterial);
           
           // Calculate horizontal offset relative to the specific face
           let xShift = 0;
@@ -517,8 +528,8 @@ export class SynthwaveCityAnimation {
       // Add phase offset so they don't all move exactly at once even in same band
       const phase = Math.sin(this.time * 0.05 + userData.phaseOffset);
 
-      // Base wobble + Audio reaction
-      const heightModifier = 1 + (inputFreq / 255) * 0.5 + (phase * 0.02);
+      // Base wobble + Audio reaction (bands are 0..100)
+      const heightModifier = 1 + (inputFreq / 100) * 0.5 + (phase * 0.02);
 
       const targetHeight = userData.baseHeight * heightModifier;
 
@@ -527,15 +538,17 @@ export class SynthwaveCityAnimation {
       building.position.y = (userData.baseHeight * building.scale.y) / 2;
 
       // Window reaction - mostly responding to High/Mid percussive sounds
-      if (userData.windowLights) {
-        const lit = (this.HIGH > 100 || this.MID > 120) && Math.random() > 0.5;
-        for (const window of userData.windowLights) {
+      const windowMaterial = userData.windowMaterial;
+      if (windowMaterial) {
+        const lit = (this.HIGH > 65 || this.MID > 65) && ((this.time + userData.phaseOffset * 10) % 4 | 0) === 0;
+        if (lit !== userData.windowsLit) {
+          userData.windowsLit = lit;
           if (lit) {
-            window.material.color.setHex(0xffffff); // Flash white
+            windowMaterial.color.setHex(0xffffff); // Flash white
           } else {
             // Return to cyan/blue with slight pulse
             const hue = (userData.baseHeight / 30) + (this.time * 0.001);
-            window.material.color.setHSL(hue % 1, 1, 0.5);
+            windowMaterial.color.setHSL(hue % 1, 1, 0.5);
           }
         }
       }
@@ -554,7 +567,7 @@ export class SynthwaveCityAnimation {
     const cityBound = 60; // Reset distance
 
     for (const vehicle of this.vehicles) {
-      const speed = vehicle.userData.speed * (1 + (this.LOW / 200)); // Bass makes cars faster
+      const speed = vehicle.userData.speed * (1 + (this.LOW / 100)); // Bass makes cars faster
 
       if (vehicle.userData.axis === 'z') {
         vehicle.position.z += speed * vehicle.userData.direction;
@@ -586,14 +599,18 @@ export class SynthwaveCityAnimation {
 
       if (userData.opacity <= 0) {
         this.scene.remove(name);
+        if (name.material) {
+          if (name.material.map) name.material.map.dispose();
+          name.material.dispose();
+        }
         this.holographicNames.splice(i, 1);
       }
 
       name.position.y += Math.sin(this.time * 0.01) * 0.01;
     }
 
-    // Spawn names on beat (Kick drum usually in LOW)
-    if (this.LOW > 140 && Math.random() < 0.05 && this.holographicNames.length < 4) {
+    // Spawn names on beat (kick drum usually lives in LOW)
+    if (this.LOW > 75 && Math.random() < 0.05 && this.holographicNames.length < 4) {
       const randomName = this.names[Math.floor(Math.random() * this.names.length)];
       const x = (Math.random() - 0.5) * 40;
       const y = 12 + Math.random() * 10;
@@ -612,7 +629,7 @@ export class SynthwaveCityAnimation {
 
     // Sun pulsing to Bass
     if (this.sun) {
-      const scale = 1 + (this.LOW / 255) * 0.2;
+      const scale = 1 + (this.LOW / 100) * 0.2;
       this.sun.scale.set(scale, scale, 1);
       this.sun.position.x = this.camera.position.x * 0.2; // Parallax effect
       this.sun.position.z = this.camera.position.z * 0.2 - 100;
@@ -621,7 +638,12 @@ export class SynthwaveCityAnimation {
   }
 
   draw = () => {
-    if (!this.webglSupported || !this.renderer) return;
+    if (!this.webglSupported || !this.renderer || !this.scene || !this.camera) {
+      // Drop the stale frame id so a later start() does not think a loop is
+      // already running while nothing is scheduled.
+      this.frameId = null;
+      return;
+    }
 
     this.time++;
 
@@ -651,15 +673,32 @@ export class SynthwaveCityAnimation {
     this.HIGH = high;
   }
 
+  resize() {
+    if (!this.renderer || !this.camera) return;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+    this.camera.aspect = rect.width / rect.height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(rect.width, rect.height, false);
+  }
+
   start() {
     console.log('[synthwave-city] Starting animation...');
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    if (rect.width > 2 && rect.height > 2) {
+      this.canvas.width = rect.width;
+      this.canvas.height = rect.height;
+    }
 
     this.init();
+    this.resize();
 
-    if (!this.frameId && this.webglSupported) {
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this.resize();
+      window.addEventListener('resize', this._resizeHandler);
+    }
+
+    if (!this.frameId && this.webglSupported && this.renderer) {
       this.frameId = requestAnimationFrame(this.draw);
     }
   }
@@ -670,30 +709,71 @@ export class SynthwaveCityAnimation {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      this._resizeHandler = null;
+    }
+
+    // Dispose every resource exactly once. Window meshes share one geometry and
+    // one material per building, and the base materials are only templates for
+    // .clone(), so plain traversal would both repeat dispose calls hundreds of
+    // times and miss the templates.
+    const disposed = new Set();
+    const disposeMaterial = (material) => {
+      if (!material || disposed.has(material)) return;
+      disposed.add(material);
+      if (material.map && !disposed.has(material.map)) {
+        disposed.add(material.map);
+        material.map.dispose();
+      }
+      material.dispose();
+    };
+    const disposeGeometry = (geometry) => {
+      if (!geometry || disposed.has(geometry)) return;
+      disposed.add(geometry);
+      geometry.dispose();
+    };
+
+    if (this.scene) {
+      this.scene.traverse((child) => {
+        disposeGeometry(child.geometry);
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) disposeMaterial(material);
+      });
+      this.scene.clear();
+    }
+
+    // Shared geometry plus the base materials that never entered the scene.
+    disposeGeometry(this.windowGeometry);
+    disposeMaterial(this.windowMaterial);
+    disposeMaterial(this.roadMaterial);
+    for (const material of Object.values(this.buildingMaterials)) disposeMaterial(material);
+
     if (this.renderer) {
       this.renderer.dispose();
+      this.renderer = null;
     }
-    if (this.scene) {
-      while (this.scene.children.length > 0) {
-        const child = this.scene.children[0];
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(m => m.dispose());
-          } else {
-            child.material.dispose();
-          }
-        }
-        this.scene.remove(child);
-      }
-    }
+
+    // Allow a clean restart: start() re-creates the scene and renderer.
+    this.scene = null;
+    this.camera = null;
+    this.buildings = [];
+    this.vehicles = [];
+    this.holographicNames = [];
+    this.particles = null;
+    this.sun = null;
+    this.buildingCount = 0;
+    this.time = 0;
+    this.cameraAngle = 0;
+    this.buildingMaterials = {};
+    this.windowMaterial = null;
+    this.windowGeometry = null;
+    this.roadMaterial = null;
 
     const viewContainer = this.canvas.closest('.animation-view');
     if (viewContainer) {
-      const errs = viewContainer.querySelectorAll('div');
-      errs.forEach(d => {
-        if (d.innerText.includes('WebGL')) d.remove();
-      });
+      viewContainer.querySelectorAll('.webgl-error-overlay').forEach((node) => node.remove());
     }
   }
 }

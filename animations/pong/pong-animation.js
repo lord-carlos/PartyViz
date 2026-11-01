@@ -5,6 +5,18 @@ export class PongAnimation {
     this.ctx = canvas.getContext('2d');
     this.config = config || {};
     this.frameId = null;
+
+    // Per-animation settings from animations.yml
+    const settings = this.config.settings || {};
+    this.basePaddleSpeed = Number(settings.paddleSpeed) || 5;
+    this.baseBallSpeed = Number(settings.ballSpeed) || 5;
+    this.particleLimit = Number(settings.particleCount) || 50;
+    this.width = 0;
+    this.height = 0;
+    this._resizeHandler = () => {
+      this.resize();
+      this.init();
+    };
     
     // Audio frequency values
     this.LOW = 0;
@@ -22,8 +34,11 @@ export class PongAnimation {
     this.ball = {
       x: 0, y: 0, radius: 8,
       speedX: 5, speedY: 3,
-      trail: []
+      trail: [],
+      trailIndex: 0,
+      trailCount: 0
     };
+    for (let i = 0; i < 20; i++) this.ball.trail.push({ x: 0, y: 0 });
     
     this.leftPaddle = { x: 30, y: 0, width: 15, height: 80, speed: 0, targetY: 0 };
     this.rightPaddle = { x: 0, y: 0, width: 15, height: 80, speed: 0, targetY: 0 };
@@ -53,20 +68,21 @@ export class PongAnimation {
     this.resetBall();
     
     // Initialize paddle positions
-    this.leftPaddle.y = this.canvas.height / 2 - 40;
+    this.leftPaddle.y = this.height / 2 - 40;
     this.leftPaddle.targetY = this.leftPaddle.y;
-    this.rightPaddle.x = this.canvas.width - 45;
-    this.rightPaddle.y = this.canvas.height / 2 - 40;
+    this.rightPaddle.x = this.width - 45;
+    this.rightPaddle.y = this.height / 2 - 40;
     this.rightPaddle.targetY = this.rightPaddle.y;
   }
   
   resetBall() {
-    this.ball.x = this.canvas.width / 2;
-    this.ball.y = this.canvas.height / 2;
+    this.ball.x = this.width / 2;
+    this.ball.y = this.height / 2;
     // Start faster for more excitement
-    this.ball.speedX = (Math.random() > 0.5 ? 1 : -1) * 7;
+    this.ball.speedX = (Math.random() > 0.5 ? 1 : -1) * (this.baseBallSpeed + 2);
     this.ball.speedY = (Math.random() - 0.5) * 8;
-    this.ball.trail = [];
+    this.ball.trailCount = 0;
+    this.ball.trailIndex = 0;
   }
   
   // --- CORE MECHANICS ---
@@ -99,7 +115,7 @@ export class PongAnimation {
     });
 
     // 4. Explosion Particles (Sparks)
-    const particleCount = 20 + (this.HIGH / 5);
+    const particleCount = Math.min(this.particleLimit, Math.round(20 + (this.HIGH / 5)));
     for (let i = 0; i < particleCount; i++) {
       const angle = (Math.PI * 2 * i) / particleCount;
       const speed = Math.random() * 5 + 2;
@@ -143,28 +159,33 @@ export class PongAnimation {
     this.rightPaddle.targetY = this.ball.y - this.rightPaddle.height / 2;
     
     // Smooth movement (Lerp)
-    this.leftPaddle.y += (this.leftPaddle.targetY - this.leftPaddle.y) * 0.1;
-    this.rightPaddle.y += (this.rightPaddle.targetY - this.rightPaddle.y) * 0.1;
+    const paddleLerp = Math.min(0.35, this.basePaddleSpeed / 50);
+    this.leftPaddle.y += (this.leftPaddle.targetY - this.leftPaddle.y) * paddleLerp;
+    this.rightPaddle.y += (this.rightPaddle.targetY - this.rightPaddle.y) * paddleLerp;
     
     // Constraints
-    const maxY = this.canvas.height - this.leftPaddle.height;
+    const maxY = this.height - this.leftPaddle.height;
     this.leftPaddle.y = Math.max(0, Math.min(maxY, this.leftPaddle.y));
     this.rightPaddle.y = Math.max(0, Math.min(maxY, this.rightPaddle.y));
   }
   
   updateBall() {
-    const speedMod = 1 //+ (this.MID / 700); // Music speeds up ball slightly
+    const speedMod = 1;
     
-    this.ball.trail.push({ x: this.ball.x, y: this.ball.y, alpha: 1 });
-    if (this.ball.trail.length > 20) this.ball.trail.shift(); // Longer trail
+    const trail = this.ball.trail;
+    const point = trail[this.ball.trailIndex];
+    point.x = this.ball.x;
+    point.y = this.ball.y;
+    this.ball.trailIndex = (this.ball.trailIndex + 1) % trail.length;
+    if (this.ball.trailCount < trail.length) this.ball.trailCount++;
     
     this.ball.x += this.ball.speedX * speedMod;
     this.ball.y += this.ball.speedY * speedMod;
     
     // Wall collisions
-    if (this.ball.y < 0 || this.ball.y > this.canvas.height) {
+    if (this.ball.y < 0 || this.ball.y > this.height) {
       this.ball.speedY *= -1;
-      this.ball.y = Math.max(0, Math.min(this.canvas.height, this.ball.y));
+      this.ball.y = Math.max(0, Math.min(this.height, this.ball.y));
       // Small wall bump sound effect visual
       this.shakeIntensity = 2;
     }
@@ -193,7 +214,7 @@ export class PongAnimation {
     }
     
     // Score / Reset
-    if (this.ball.x < 0 || this.ball.x > this.canvas.width) {
+    if (this.ball.x < 0 || this.ball.x > this.width) {
       this.shakeIntensity = 20; // Big shake on score
       this.resetBall();
     }
@@ -258,29 +279,27 @@ export class PongAnimation {
     ctx.lineWidth = 1;
     
     const gridSize = 40;
+    ctx.beginPath();
     
     // Vertical lines
-    for (let x = 0; x <= this.canvas.width; x += gridSize) {
-      ctx.beginPath();
+    for (let x = 0; x <= this.width; x += gridSize) {
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, this.canvas.height);
-      ctx.stroke();
+      ctx.lineTo(x, this.height);
     }
     
     // Horizontal lines (moving)
-    for (let y = this.gridOffset; y <= this.canvas.height; y += gridSize) {
-      ctx.beginPath();
+    for (let y = this.gridOffset; y <= this.height; y += gridSize) {
       ctx.moveTo(0, y);
-      ctx.lineTo(this.canvas.width, y);
-      ctx.stroke();
+      ctx.lineTo(this.width, y);
     }
+    ctx.stroke();
     ctx.globalAlpha = 1;
   }
   
   draw = () => {
     const ctx = this.ctx;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    const w = this.width;
+    const h = this.height;
     
     this.updatePaddles();
     this.updateBall();
@@ -323,12 +342,15 @@ export class PongAnimation {
       ctx.stroke();
     }
     
-    // Draw Ball Trail
-    for (let i = 0; i < this.ball.trail.length; i++) {
-      const t = this.ball.trail[i];
-      const size = (i / this.ball.trail.length) * this.ball.radius;
+    // Draw Ball Trail (ring buffer, oldest -> newest)
+    const trail = this.ball.trail;
+    const count = this.ball.trailCount;
+    for (let i = 0; i < count; i++) {
+      const index = (this.ball.trailIndex - count + i + trail.length) % trail.length;
+      const t = trail[index];
+      const size = (i / trail.length) * this.ball.radius;
       ctx.fillStyle = mainColor;
-      ctx.globalAlpha = i / this.ball.trail.length;
+      ctx.globalAlpha = i / trail.length;
       ctx.beginPath();
       ctx.arc(t.x, t.y, size, 0, Math.PI * 2);
       ctx.fill();
@@ -380,11 +402,22 @@ export class PongAnimation {
     this.HIGH = high;
   }
   
-  start() {
+  resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    const width = Math.max(1, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
+    this.width = width;
+    this.height = height;
+    this.canvas.width = Math.floor(width * dpr);
+    this.canvas.height = Math.floor(height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  start() {
+    this.resize();
     this.init();
+    window.addEventListener('resize', this._resizeHandler);
     if (!this.frameId) this.frameId = requestAnimationFrame(this.draw);
   }
   
@@ -393,5 +426,6 @@ export class PongAnimation {
       cancelAnimationFrame(this.frameId);
       this.frameId = null;
     }
+    window.removeEventListener('resize', this._resizeHandler);
   }
 }

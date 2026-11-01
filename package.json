@@ -1,0 +1,21 @@
+{
+  "name": "partyviz",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A single-page, zero-build collection of audio-reactive canvas animations.",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "validate": "node scripts/validate-animations.mjs",
+    "test": "node --test tests/",
+    "check": "node scripts/validate-animations.mjs && node --test tests/",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "bun@1.4.3"
+}

@@ -16,8 +16,10 @@ export class PachinkoAnimation {
     this.maxBalls = this.config.settings?.maxBalls || 50;
 
     // Physics Configuration
-    this.gravity = this.config.settings?.gravity || 0.5;
-    this.dampingFactor = this.config.settings?.dampingFactor || 0.8; // Energy loss on bounce
+    this.baseGravity = this.config.settings?.gravity ?? 0.5;
+    this.baseDamping = this.config.settings?.dampingFactor ?? 0.8; // Energy loss on bounce
+    this.gravity = this.baseGravity;
+    this.dampingFactor = this.baseDamping;
     this.ballVelocity = { x: 0, y: 0 };
 
     // Board Configuration
@@ -87,6 +89,9 @@ export class PachinkoAnimation {
     this.comboTexts = [];
     this.screenOverlay = null;
     this.glowSprites = [];
+    this.impactWaves = [];
+    this._comboCooldowns = new Map();
+    this._comboTimers = new Set();
 
     // Animation parameters
     this.time = 0;
@@ -131,6 +136,7 @@ export class PachinkoAnimation {
   init() {
     console.log('[pachinko] Initializing 3D scene...');
 
+    if (this.scene) return; // start() can be called again after a pause
     if (!this.webglSupported) {
       console.error('[pachinko] WebGL is not supported in this browser');
       this.showWebGLError();
@@ -142,13 +148,16 @@ export class PachinkoAnimation {
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x000000); // Black background
 
-      // Setup camera
-      const aspect = this.canvas.width / this.canvas.height;
+      // Setup camera. Fit the board without stretching it to the canvas aspect.
+      const aspect = this.canvas.width / this.canvas.height || 1;
+      const viewHeight = Math.max(this.boardHeight, this.boardWidth / aspect);
+      const halfHeight = viewHeight / 2;
+      const halfWidth = halfHeight * aspect;
       this.camera = new THREE.OrthographicCamera(
-        -this.boardWidth / 2, this.boardWidth / 2,  // Fix: use same aspect for both dimensions
-        this.boardHeight / 2, -this.boardHeight / 2,   // Fix: use same aspect for both dimensions
-        1,                                    // Near plane
-        1000                                   // Far plane
+        -halfWidth, halfWidth,
+        halfHeight, -halfHeight,
+        1,
+        1000
       );
       this.camera.position.z = 10;
 
@@ -159,8 +168,8 @@ export class PachinkoAnimation {
         alpha: true
       });
 
-      this.renderer.setSize(this.canvas.width, this.canvas.height);
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this.renderer.setSize(this.canvas.width, this.canvas.height, false);
 
       // Try to setup post-processing (Phase 4)
       try {
@@ -234,8 +243,13 @@ export class PachinkoAnimation {
   }
 
   showWebGLError() {
+    // start() is idempotent; never stack a second overlay on a repeated call.
+    const viewContainer = this.canvas.closest('.animation-view');
+    if (!viewContainer || viewContainer.querySelector('.webgl-error-overlay')) return;
+
     // Create error message as HTML overlay
     const errorDiv = document.createElement('div');
+    errorDiv.className = 'webgl-error-overlay';
     errorDiv.style.cssText = `
       position: absolute;
       top: 50%;
@@ -256,10 +270,7 @@ export class PachinkoAnimation {
       <div style="color: #00ffff; font-size: 16px; margin-top: 10px;">Please try a different browser</div>
     `;
 
-    const viewContainer = this.canvas.closest('.animation-view');
-    if (viewContainer) {
-      viewContainer.appendChild(errorDiv);
-    }
+    viewContainer.appendChild(errorDiv);
   }
 
   createMaterials() {
@@ -324,7 +335,7 @@ export class PachinkoAnimation {
 
       for (let col = 0; col < pegsInRow; col++) {
         const pegGeometry = new THREE.SphereGeometry(this.pegRadius, 12, 12);
-        const peg = new THREE.Mesh(pegGeometry, this.pegMaterial);
+        const peg = new THREE.Mesh(pegGeometry, this.pegMaterial.clone());
 
         // Position peg
         peg.position.x = -this.boardWidth / 2 + xOffset + (col + 1) * xSpacing;
@@ -336,6 +347,8 @@ export class PachinkoAnimation {
           baseColor: 0xffffff,
           glowIntensity: 0,
           targetGlow: 0,
+          glowColor: new THREE.Color(0xffffff),
+          spriteIndex: this.pegs.length,
           rotationSpeed: 0.001 + Math.random() * 0.002
         };
 
@@ -433,8 +446,26 @@ export class PachinkoAnimation {
     ball.userData = {
       velocity: new THREE.Vector3(0, -2, 0),
       colorIndex: colorIndex,
-      trail: [] // Phase 4: Trail data
+      trail: null
     };
+
+    // One reusable trail line per ball (no geometry/material churn in draw).
+    if (this.trailEnabled) {
+      const trailLength = 10;
+      const trailPositions = new Float32Array(trailLength * 3);
+      const trailGeometry = new THREE.BufferGeometry();
+      trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+      const trailMaterial = new THREE.LineBasicMaterial({
+        color: this.ballColors[colorIndex],
+        transparent: true,
+        opacity: 0.6
+      });
+      const trailLine = new THREE.Line(trailGeometry, trailMaterial);
+      trailLine.frustumCulled = false;
+      trailLine.visible = false;
+      ball.userData.trail = { line: trailLine, positions: trailPositions, length: trailLength };
+      this.scene.add(trailLine);
+    }
 
     this.balls.push(ball);
     this.scene.add(ball);
@@ -536,7 +567,7 @@ export class PachinkoAnimation {
       userData.velocity.multiplyScalar(0.999);
 
       // Update position
-      ball.position.add(userData.velocity.clone().multiplyScalar(0.016));
+      ball.position.addScaledVector(userData.velocity, 0.016);
 
       // Enhanced collision detection with pegs
       for (const peg of this.pegs) {
@@ -684,7 +715,15 @@ export class PachinkoAnimation {
           zoneScore
         );
 
-        // Remove ball
+        // Remove ball and its trail. The ball material is shared per color, so
+        // only the per-ball geometry is disposed here.
+        if (ball.userData.trail) {
+          this.scene.remove(ball.userData.trail.line);
+          ball.userData.trail.line.geometry.dispose();
+          ball.userData.trail.line.material.dispose();
+          ball.userData.trail = null;
+        }
+        ball.geometry.dispose();
         this.scene.remove(ball);
         this.balls.splice(i, 1);
       }
@@ -778,18 +817,21 @@ export class PachinkoAnimation {
       }
 
       // Apply glow to peg material
-      const glowColor = new THREE.Color(peg.userData.baseColor);
-      glowColor.r += peg.userData.glowIntensity * 0.5;
-      glowColor.g += peg.userData.glowIntensity * 0.5;
-      glowColor.b += peg.userData.glowIntensity * 0.5;
-      peg.material.color = glowColor;
+      const glow = peg.userData.glowIntensity;
+      peg.userData.glowColor.setRGB(
+        Math.min(1, 1 + glow * 0.5),
+        Math.min(1, 1 + glow * 0.5),
+        Math.min(1, 1 + glow * 0.5)
+      );
+      peg.material.color.copy(peg.userData.glowColor);
 
       // Update glow sprite position
-      if (this.glowSprites[this.pegs.indexOf(peg)]) {
-        this.glowSprites[this.pegs.indexOf(peg)].position.copy(peg.position);
-        this.glowSprites[this.pegs.indexOf(peg)].position.z = peg.position.z - 0.1;
-        this.glowSprites[this.pegs.indexOf(peg)].scale.setScalar(1 + peg.userData.glowIntensity);
-        this.glowSprites[this.pegs.indexOf(peg)].material.opacity = peg.userData.glowIntensity * 0.3;
+      const glowSprite = this.glowSprites[peg.userData.spriteIndex];
+      if (glowSprite) {
+        glowSprite.position.copy(peg.position);
+        glowSprite.position.z = peg.position.z - 0.1;
+        glowSprite.scale.setScalar(1 + peg.userData.glowIntensity);
+        glowSprite.material.opacity = peg.userData.glowIntensity * 0.3;
       }
     }
   }
@@ -831,7 +873,6 @@ export class PachinkoAnimation {
         // Fade in with bounce effect
         const bounce = Math.sin(name.age * 0.2) * 0.1;
         name.opacity = Math.min(name.opacity + fadeSpeed, name.targetOpacity);
-        name.rotation += 0.05;
 
         name.sprite.scale.set(
           this.nameScale * (1 + bounce),
@@ -854,13 +895,16 @@ export class PachinkoAnimation {
       // Add color pulsing based on audio
       if (this.HIGH > 70) {
         const hue = (this.time * 0.02 + name.age * 0.01) % 1;
-        const color = new THREE.Color().setHSL(hue, 0.8, 0.9);
-        name.sprite.material.color = color;
+        name.sprite.material.color.setHSL(hue, 0.8, 0.9);
       }
 
-      // Remove faded names
+      // Remove faded names and release their canvas textures.
       if (name.age >= name.lifetime && name.opacity <= 0) {
         this.scene.remove(name.sprite);
+        if (name.sprite.material) {
+          if (name.sprite.material.map) name.sprite.material.map.dispose();
+          name.sprite.material.dispose();
+        }
         this.displayedNames.splice(i, 1);
       }
     }
@@ -868,9 +912,13 @@ export class PachinkoAnimation {
 
   // Phase 4: Audio-reactive board effects
   updateBoardEffects() {
-    // Board glow based on low frequencies
-    const boardGlow = 0.1 + (this.LOW / 100) * 0.3;
-    this.scene.background = new THREE.Color(0x000000).offsetHSL(0, 0, boardGlow);
+    // Board glow based on low frequencies. Keep the background nearly black:
+    // a large lightness offset turns the entire viewport gray and washes out
+    // the board. Mutate the existing color instead of allocating per frame.
+    const boardGlow = 0.008 + (this.LOW / 100) * 0.045;
+    if (this.scene.background && this.scene.background.setHSL) {
+      this.scene.background.setHSL(0.55, 0.55, boardGlow);
+    }
 
     // Update screen overlay for effects
     if (this.screenOverlay) {
@@ -879,7 +927,7 @@ export class PachinkoAnimation {
 
       // Add scanline effect
       const scanlineIntensity = Math.sin(this.time * 0.1) * 0.1 + 0.1;
-      this.screenOverlay.material.color = new THREE.Color(0x00ffff).multiplyScalar(scanlineIntensity);
+      this.screenOverlay.material.color.setRGB(0, scanlineIntensity, scanlineIntensity);
     }
   }
 
@@ -916,11 +964,11 @@ export class PachinkoAnimation {
       this.screenShake.y *= 0.9;
     }
 
-    // Audio-reactive gravity
-    this.gravity = 0.5 + (this.LOW / 100) * 0.3;
+    // Audio-reactive gravity, relative to the configured base value
+    this.gravity = this.baseGravity * (1 + (this.LOW / 100) * 0.3);
 
     // Dynamic damping based on audio
-    this.dampingFactor = 0.8 - (this.MID / 100) * 0.2;
+    this.dampingFactor = Math.max(0.4, this.baseDamping - (this.MID / 100) * 0.15);
   }
 
   // Phase 4: Enhanced spawn effect
@@ -947,7 +995,7 @@ export class PachinkoAnimation {
         this.particleData.lifetimes[i] = 30;
 
         // Set particle color
-        this.particles.material.color = new THREE.Color(color);
+        this.particles.material.color.setHex(color);
       }
     }
   }
@@ -969,9 +1017,13 @@ export class PachinkoAnimation {
       }
     }
 
-    // Create combo effects
+    // Create combo effects, but never more than once per second per zone.
     for (const zoneKey in zoneNames) {
       if (zoneNames[zoneKey].length >= 2) {
+        const lastFired = this._comboCooldowns.get(zoneKey) || -Infinity;
+        if (this.time - lastFired < 60) continue;
+        this._comboCooldowns.set(zoneKey, this.time);
+
         // Create combo celebration
         const centerX = -this.boardWidth / 2 + parseInt(zoneKey) * (this.boardWidth / 5) + (this.boardWidth / 10);
         const centerY = -this.boardHeight / 2 - 2;
@@ -1018,15 +1070,21 @@ export class PachinkoAnimation {
     this.scene.add(sprite);
 
     // Auto-remove after animation
-    setTimeout(() => {
-      if (this.scene.children.includes(sprite)) {
+    const timerId = setTimeout(() => {
+      this._comboTimers.delete(timerId);
+      if (this.scene && this.scene.children.includes(sprite)) {
         this.scene.remove(sprite);
+        if (sprite.material) {
+          if (sprite.material.map) sprite.material.map.dispose();
+          sprite.material.dispose();
+        }
         const index = this.comboTexts.indexOf(sprite);
         if (index > -1) {
           this.comboTexts.splice(index, 1);
         }
       }
     }, 2000);
+    this._comboTimers.add(timerId);
   }
 
   // Phase 4: Combo effect creation
@@ -1065,7 +1123,7 @@ export class PachinkoAnimation {
 
       // Safely set particle data
       if (this.particleData.positions && this.particleData.velocities &&
-        this.particleData.lifetimes && this.particleData.colors) {
+        this.particleData.lifetimes) {
 
         // Create star burst pattern
         const angle = (Math.PI * 2 * i) / activeCount + this.time * 0.1;
@@ -1119,7 +1177,7 @@ export class PachinkoAnimation {
         this.particleData.lifetimes[particleIndex] = 40 + score * 10;
 
         // Set particle color
-        this.particles.material.color = new THREE.Color(color);
+        this.particles.material.color.setHex(color);
       }
     }
   }
@@ -1128,54 +1186,24 @@ export class PachinkoAnimation {
   createEnergyTrail(ball) {
     if (!this.trailEnabled || !ball.userData.trail) return;
 
-    // Create trail points behind ball
-    const trailLength = 10;
-    const trailPoints = [];
+    const { line, positions, length } = ball.userData.trail;
+    const velocity = ball.userData.velocity;
 
-    for (let i = 0; i < trailLength; i++) {
-      // Calculate trail position
-      const trailPos = ball.position.clone().add(
-        ball.userData.velocity.clone().multiplyScalar(-i * 0.1)
-      );
-      trailPoints.push(trailPos);
+    // Write positions in place; the BufferAttribute already exists.
+    for (let i = 0; i < length; i++) {
+      positions[i * 3] = ball.position.x - velocity.x * i * 0.1;
+      positions[i * 3 + 1] = ball.position.y - velocity.y * i * 0.1;
+      positions[i * 3 + 2] = ball.position.z - velocity.z * i * 0.1;
     }
 
-    // Create trail geometry
-    const trailGeometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(trailLength * 3);
-
-    for (let i = 0; i < trailLength; i++) {
-      positions[i * 3] = trailPoints[i].x;
-      positions[i * 3 + 1] = trailPoints[i].y;
-      positions[i * 3 + 2] = trailPoints[i].z;
-    }
-
-    trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    // Create trail material with ball color
-    const trailMaterial = new THREE.LineBasicMaterial({
-      color: this.ballColors[ball.userData.colorIndex],
-      transparent: true,
-      opacity: 0.6
-    });
-
-    // Create trail line
-    const trail = new THREE.Line(trailGeometry, trailMaterial);
-    this.scene.add(trail);
-
-    // Add to ball's trail array for cleanup
-    ball.userData.trail.push(trail);
-
-    // Limit trail length
-    if (ball.userData.trail.length > 5) {
-      const oldTrail = ball.userData.trail.shift();
-      this.scene.remove(oldTrail);
-    }
+    line.geometry.attributes.position.needsUpdate = true;
+    line.visible = true;
   }
 
   // Add this method for creating impact waves
   createImpactWave(x, y, color) {
-    // Create expanding ring effect
+    // Create expanding ring effect; animated from the main draw loop so stop()
+    // cannot leave an untracked requestAnimationFrame chain running.
     const ringGeometry = new THREE.RingGeometry(0.5, 1, 0.2, 20);
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: color,
@@ -1187,26 +1215,24 @@ export class PachinkoAnimation {
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
     ring.position.set(x, y, 0);
     this.scene.add(ring);
+    this.impactWaves.push({ mesh: ring, scale: 0.1, opacity: 0.8 });
+  }
 
-    // Animate and remove ring
-    let scale = 0.1;
-    let opacity = 0.8;
+  updateImpactWaves() {
+    for (let i = this.impactWaves.length - 1; i >= 0; i--) {
+      const wave = this.impactWaves[i];
+      wave.scale += 0.02;
+      wave.opacity -= 0.02;
+      wave.mesh.scale.set(wave.scale, wave.scale, wave.scale);
+      wave.mesh.material.opacity = wave.opacity;
 
-    const animateRing = () => {
-      scale += 0.02;
-      opacity -= 0.02;
-
-      ring.scale.set(scale, scale, scale);
-      ring.material.opacity = opacity;
-
-      if (opacity > 0) {
-        requestAnimationFrame(animateRing);
-      } else {
-        this.scene.remove(ring);
+      if (wave.opacity <= 0) {
+        this.scene.remove(wave.mesh);
+        wave.mesh.geometry.dispose();
+        wave.mesh.material.dispose();
+        this.impactWaves.splice(i, 1);
       }
-    };
-
-    animateRing();
+    }
   }
 
   // Add this method for creating floating particles
@@ -1246,7 +1272,10 @@ export class PachinkoAnimation {
   }
 
   draw = () => {
-    if (!this.webglSupported || !this.renderer) {
+    if (!this.webglSupported || !this.renderer || !this.scene || !this.camera) {
+      // Drop the stale frame id so a later start() does not think a loop is
+      // already running while nothing is scheduled.
+      this.frameId = null;
       return;
     }
 
@@ -1262,6 +1291,7 @@ export class PachinkoAnimation {
     this.updatePegs();
     this.updateScoringZones();
     this.updateBoardEffects();
+    this.updateImpactWaves();
     this.checkCombos();
 
     // Update energy trails for balls
@@ -1292,24 +1322,43 @@ export class PachinkoAnimation {
     this.HIGH = high;
   }
 
+  resize() {
+    if (!this.renderer || !this.camera) return;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+
+    const aspect = rect.width / rect.height;
+    const viewHeight = Math.max(this.boardHeight, this.boardWidth / aspect);
+    const halfHeight = viewHeight / 2;
+    const halfWidth = halfHeight * aspect;
+    this.camera.left = -halfWidth;
+    this.camera.right = halfWidth;
+    this.camera.top = halfHeight;
+    this.camera.bottom = -halfHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(rect.width, rect.height, false);
+  }
+
   start() {
     console.log('[pachinko] Starting animation...');
 
-    // Handle Resolution
+    // Handle resolution
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    if (rect.width > 2 && rect.height > 2) {
+      this.canvas.width = rect.width;
+      this.canvas.height = rect.height;
+    }
 
-    console.log('[pachinko] Canvas size set to:', this.canvas.width, 'x', this.canvas.height);
-
-    // Initialize 3D scene
     this.init();
+    this.resize();
 
-    if (!this.frameId && this.webglSupported) {
-      console.log('[pachinko] Starting animation frame loop');
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this.resize();
+      window.addEventListener('resize', this._resizeHandler);
+    }
+
+    if (!this.frameId && this.webglSupported && this.renderer) {
       this.frameId = requestAnimationFrame(this.draw);
-    } else {
-      console.log('[pachinko] Animation already running or WebGL not supported');
     }
   }
 
@@ -1320,40 +1369,79 @@ export class PachinkoAnimation {
       this.frameId = null;
     }
 
-    // Clean up Three.js resources
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      this._resizeHandler = null;
+    }
+
+    for (const timerId of this._comboTimers) clearTimeout(timerId);
+    this._comboTimers.clear();
+    this._comboCooldowns.clear();
+
+    // Clean up post-processing before the renderer/scene.
+    try {
+      if (this.bloomPass && this.bloomPass.dispose) this.bloomPass.dispose();
+      if (this.renderPass && this.renderPass.dispose) this.renderPass.dispose();
+      if (this.composer && this.composer.dispose) this.composer.dispose();
+    } catch (err) {
+      console.warn('[pachinko] Error disposing composer', err);
+    }
+
     if (this.renderer) {
       this.renderer.dispose();
+      this.renderer = null;
     }
 
-    // Clear scene
+    // Clear scene recursively (balls hold trail lines).
     if (this.scene) {
-      while (this.scene.children.length > 0) {
-        const child = this.scene.children[0];
+      this.scene.traverse((child) => {
         if (child.geometry) child.geometry.dispose();
         if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(material => material.dispose());
-          } else {
-            child.material.dispose();
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (const material of materials) {
+            if (material.map) material.map.dispose();
+            material.dispose();
           }
         }
-        this.scene.remove(child);
-      }
+      });
+      this.scene.clear();
     }
 
-    // Clear arrays
+    // The base peg material is only a template for per-peg clones and the ball
+    // materials may never have been attached to a ball, so scene traversal does
+    // not necessarily release them. dispose() is safe to call twice.
+    if (this.pegMaterial) this.pegMaterial.dispose();
+    for (const material of this.ballMaterials) material.dispose();
+    if (this.particleMaterial) this.particleMaterial.dispose();
+
+    // Clear arrays and allow a clean restart.
+    this.scene = null;
+    this.camera = null;
+    this.composer = null;
+    this.renderPass = null;
+    this.bloomPass = null;
     this.pegs = [];
     this.balls = [];
     this.scoringZones = [];
     this.displayedNames = [];
     this.comboTexts = [];
     this.glowSprites = [];
+    this.impactWaves = [];
+    this.screenOverlay = null;
+    this.screenShake.x = 0;
+    this.screenShake.y = 0;
+    this.particles = null;
+    this.particleData = [];
+    this.pegMaterial = null;
+    this.ballMaterials = [];
+    this.particleMaterial = null;
+    this.time = 0;
+    this.ballSpawnTimer = 0;
 
     // Remove any error messages
     const viewContainer = this.canvas.closest('.animation-view');
     if (viewContainer) {
-      const errorDivs = viewContainer.querySelectorAll('div[style*="WebGL not supported"]');
-      errorDivs.forEach(div => div.remove());
+      viewContainer.querySelectorAll('.webgl-error-overlay').forEach((div) => div.remove());
     }
   }
 }
